@@ -1,5 +1,9 @@
 # ETA-112 — Parola Aracı
 
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
+![Platform](https://img.shields.io/badge/platform-Pardus%20ETAP%20%C2%B7%20Debian-informational)
+![Python](https://img.shields.io/badge/python-3-blue)
+
 Tek araçta iki iş yapar:
 
 - **Kullanıcı parolası** — Bilgisayardaki bir Linux hesabının (örn. `etapadmin`) **unutulan
@@ -62,3 +66,22 @@ parolayla** giriş yapabilirsiniz.
 
 - Geliştirici: **Özgür Koca** — [ozgurkoca.com](https://ozgurkoca.com)
 - Lisans: **GPL-3.0-or-later** — özgür yazılım.
+
+---
+
+## In short (English)
+
+**ETA-112** is a single tool with two functions for Pardus ETAP / Debian systems:
+
+- **User password** — reset a forgotten Linux account password (e.g. `etapadmin`), either from a
+  live USB or the running system.
+- **BIOS password** — read, set, or clear the BIOS supervisor/user password (supported models only).
+
+Run it (no install needed):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/enseitankado/eta-112/main/baslat.sh | sudo bash
+```
+
+Then pick **1) user password** or **2) BIOS password** from the menu. Requires root (`sudo`).
+Licensed under **GPL-3.0-or-later**. Author: Özgür Koca — [ozgurkoca.com](https://ozgurkoca.com).
