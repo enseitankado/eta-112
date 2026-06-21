@@ -4,12 +4,12 @@
 ![Platform](https://img.shields.io/badge/platform-Pardus%20ETAP%20%C2%B7%20Debian-informational)
 ![Python](https://img.shields.io/badge/python-3-blue)
 
-Tek araçta iki iş yapar:
 
-- **Kullanıcı parolası** — Bilgisayardaki bir Linux hesabının (örn. `etapadmin`) **unutulan
+
+- **Kullanıcı parolası** — Bilgisayarda yüklü işletim sisteminde kayıtlı bir Linux hesabının (örn. `etapadmin`) **
   parolasını yeni bir parolayla değiştirir.**
 - **BIOS parolası** — BIOS **yönetici/kullanıcı parolasını okur, ayarlar veya temizler**
-  (yalnızca desteklenen modellerde).
+  (yalnızca desteklenen akıllı tahta modellerinde).
 
 Hem **canlı (USB) ortamdan** hem de **çalışan sistemden** kullanılabilir.
 
@@ -17,7 +17,7 @@ Hem **canlı (USB) ortamdan** hem de **çalışan sistemden** kullanılabilir.
 
 ## Çalıştırma
 
-İnternet üzerinden (kurulum gerektirmez):
+Kurulum gerektirmez. Aşağıdaki komutu kopyalayarak bir terminale yapıştırın.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/enseitankado/eta-112/main/baslat.sh | sudo bash
@@ -28,10 +28,9 @@ Menüden **1) Kullanıcı parolası** veya **2) BIOS parolası** seçilir.
 ---
 
 Adımlar:
-1. Bilgisayardaki sistem(ler) bulunur; birden fazlaysa hangisi olduğu sorulur.
+1. Bilgisayardaki kurulu işletim sistemi otomatik olarak bulunur
 2. Hesaplar **numaralı bir liste** olarak gösterilir (root, etapadmin, ogretmen, ogrenci…).
-   Tüm hesapları görmek için `tum` yazın.
-3. Sıfırlamak istediğiniz hesabın **numarasını** girin.
+3. Sıfırlamak istediğiniz hesabın **numarasını** girin. Tüm hesapları sıfırlamak için `tum` yazın.
 4. Yeni parolayı iki kez girin. Parola uygulanır ve doğru ayarlandığı **teyit edilir**.
 
 ![Menüden "1) Kullanıcı parolası": sistem ve hesaplar listelenir, sıfırlanacak hesap numarayla seçilir](1.png)
@@ -69,19 +68,3 @@ parolayla** giriş yapabilirsiniz.
 
 ---
 
-## In short (English)
-
-**ETA-112** is a single tool with two functions for Pardus ETAP / Debian systems:
-
-- **User password** — reset a forgotten Linux account password (e.g. `etapadmin`), either from a
-  live USB or the running system.
-- **BIOS password** — read, set, or clear the BIOS supervisor/user password (supported models only).
-
-Run it (no install needed):
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/enseitankado/eta-112/main/baslat.sh | sudo bash
-```
-
-Then pick **1) user password** or **2) BIOS password** from the menu. Requires root (`sudo`).
-Licensed under **GPL-3.0-or-later**. Author: Özgür Koca — [ozgurkoca.com](https://ozgurkoca.com).

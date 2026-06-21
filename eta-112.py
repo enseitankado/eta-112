@@ -1083,7 +1083,29 @@ def _edit_image(data, prof, edits):
                 data[a:a+prof["slot_len"]]=val; changes.append((a,old,val))
     return bytes(data), changes
 
-def _write_flow(prof, edits, outpath):
+def _edit_setup_pwcheck(data, prof, value):
+    """Setup değişkeninin 'Password Check' baytını HER İKİ bankadaki tüm Setup
+    girişlerinde (adlandırılmış 'Setup' + zincir devamı) ayarlar. 1=Setup, 2=Always.
+    Bu profilde 330-345 baytlık tüm bloblar Setup'a aittir (boyut çakışması yok)."""
+    data=bytearray(data); changes=[]; off=prof["pwcheck_off"]; n=len(data); NV=b"NVAR"
+    i=data.find(NV)
+    while i!=-1 and i<n-10:
+        size=struct.unpack("<H",data[i+4:i+6])[0]
+        if 8<size<0x400 and i+size<=n:
+            flags=data[i+9]
+            if flags&0x02:
+                end=data.find(b"\x00",i+11); doff=(end+1)-i if end!=-1 else 10
+            else: doff=10
+            if 330<=size-doff<=345 and any(lo<=i<hi for (lo,hi) in prof["banks"]):
+                a=i+doff+off
+                if i<a<i+size and data[a]!=value:
+                    changes.append((a,data[a],value)); data[a]=value
+            i=data.find(NV,i+size)
+        else:
+            i=data.find(NV,i+1)
+    return bytes(data), changes
+
+def _write_flow(prof, edits, outpath, pwcheck=None):
     """Yaz (oku+düzenle+yaz) -> geri-oku doğrula. Doner: {ok,changed,error,verified}."""
     if os.geteuid()!=0: return {"ok":False,"changed":False,"error":"sudo gerekli"}
     RE=max(hi for lo,hi in prof["banks"]); sl=prof["slot_len"]
@@ -1091,6 +1113,8 @@ def _write_flow(prof, edits, outpath):
     cur,err=flashrom_read(prof["chip"], show=False, region_end=RE)
     if cur is None: return {"ok":False,"changed":False,"error":"okunamadı"}
     new,changes=_edit_image(cur, prof, edits)
+    if pwcheck is not None:
+        new,pchanges=_edit_setup_pwcheck(new, prof, pwcheck); changes=changes+pchanges
     if not changes: return {"ok":True,"changed":False,"error":None,"verified":True}
     diffs=[i for i in range(len(cur)) if cur[i]!=new[i]]
     if any(not any(lo<=x<hi for (lo,hi) in prof["banks"]) for x in diffs):
@@ -1113,8 +1137,15 @@ def _write_flow(prof, edits, outpath):
     verified=False
     rb,_=flashrom_read(prof["chip"], show=False, region_end=RE)
     if rb:
-        b=resolve_current(nvar_scan(rb), prof["banks"])
-        if b: verified=all(b[off:off+sl]==val for off,val in edits)
+        edok=True
+        if edits:
+            b=resolve_current(nvar_scan(rb), prof["banks"])
+            edok=bool(b) and all(b[off:off+sl]==val for off,val in edits)
+        pwok=True
+        if pwcheck is not None:
+            sp=nvar_setup_payload(rb, prof["active_store_end"])
+            pwok=bool(sp) and len(sp)>prof["pwcheck_off"] and sp[prof["pwcheck_off"]]==pwcheck
+        verified=edok and pwok
     return {"ok":True,"changed":True,"error":None,"verified":verified}
 
 def _write_result_print(res):
@@ -1129,9 +1160,11 @@ def cmd_set(a):
     if not prof:
         return emit({"ok":False,"error":"desteklenmeyen model"},1) if _JSON else 1
     ks=prof["keystream"]; pmin,pmax=prof["pw_min"],prof["pw_max"]
-    edits=[]; shown={}
+    edits=[]; shown={}; pwcheck=None
     yon_arg=getattr(a,"yonetici",None); kul_arg=getattr(a,"kullanici",None)
-    if _JSON or yon_arg is not None or kul_arg is not None:
+    kor_arg=getattr(a,"koruma",None)
+    if kor_arg: pwcheck={"always":2,"acilis":2,"setup":1}[kor_arg]   # 2=her açılışta, 1=yalnız setup
+    if _JSON or yon_arg is not None or kul_arg is not None or kor_arg is not None:
         # parametreli (GUI/makine): degerleri dogrula
         for val,key,slot in ((yon_arg,"supervisor",prof["slot_super"]),(kul_arg,"user",prof["slot_user"])):
             if val is None: continue
@@ -1140,9 +1173,9 @@ def cmd_set(a):
                 if _JSON: return emit({"ok":False,"error":f"{key}: {err}"},1)
                 print(R(f"  {key}: {err}")); return 1
             edits.append((slot, obf(v, ks))); shown[key]=v
-        if not edits:
-            if _JSON: return emit({"ok":False,"error":"parola verilmedi"},1)
-            print(Y("  Parola verilmedi.")); return 0
+        if not edits and pwcheck is None:
+            if _JSON: return emit({"ok":False,"error":"parola/koruma verilmedi"},1)
+            print(Y("  Parola/koruma verilmedi.")); return 0
     else:
         # etkilesimli (tus tus, BUYUK harf)
         print(B("\nParola ayarla ")+D("(boş bırakırsan o parola değişmez)"))
@@ -1151,19 +1184,30 @@ def cmd_set(a):
             if not raw: continue
             if len(raw)<pmin: print(R(f"    En az {pmin} karakter olmalı; atlandı.")); continue
             v=to_bios(raw, pmax); edits.append((slot, obf(v, ks))); shown[key]=trq(v)
-        if not edits: print(Y("  Parola girilmedi.")); return 0
+        if "supervisor" in shown:
+            print(D("\n  Yönetici parolası ne zaman sorulsun? ")+D("(boş = değiştirme)"))
+            print("    1) "+G("Her açılışta"))
+            print("    2) "+G("Yalnız BIOS ayarlarına girerken"))
+            try: kk=input("  Seçim [1/2]: ").strip()
+            except EOFError: kk=""
+            pwcheck={"1":2,"2":1}.get(kk)
+        if not edits and pwcheck is None: print(Y("  Parola girilmedi.")); return 0
         print()
-        if "supervisor" in shown: print(f"  Yönetici: {G(shown['supervisor'])}")
+        if "supervisor" in shown: print(f"  Yönetici : {G(shown['supervisor'])}")
         if "user" in shown:       print(f"  Kullanıcı: {G(shown['user'])}")
-        try: ans=input(f"\n  {Y('Bu parolaları yazmak istiyor musunuz?')} (e/h): ").strip().lower()
+        if pwcheck is not None:
+            print(f"  Sorulma  : {G('her açılışta' if pwcheck==2 else 'yalnız BIOS ayarlarına girerken')}")
+        try: ans=input(f"\n  {Y('Yazmak istiyor musunuz?')} (e/h): ").strip().lower()
         except EOFError: ans=""
         if ans not in ("e","evet"):
             print(Y("  İptal edildi.")); return 0
-    res=_write_flow(prof, edits, a.out)
+    res=_write_flow(prof, edits, a.out, pwcheck=pwcheck)
+    prot=None if pwcheck is None else ("always" if pwcheck==2 else "setup")  # read --json ile aynı sözleşme
     if _JSON:
         return emit({"ok":res["ok"],"changed":res["changed"],"error":res["error"],
                      "verified":res.get("verified"),
-                     "supervisor":shown.get("supervisor"),"user":shown.get("user")},
+                     "supervisor":shown.get("supervisor"),"user":shown.get("user"),
+                     "protection":prot},
                     0 if res["ok"] else 1)
     _write_result_print(res); return 0 if res["ok"] else 1
 
@@ -1200,6 +1244,8 @@ def build_parser():
         "", D("  # GUI/makine için JSON çıktı ve parametreli ayarlama:"),
         "  sudo "+prog+" "+G("read")+" "+Cy("--json"),
         "  sudo "+prog+" "+G("set")+" "+Cy("--yonetici ORNEK99 --kullanici ABC123 --json"),
+        "  sudo "+prog+" "+G("set")+" "+Cy("--yonetici ORNEK99 --koruma always --json")+D("  # her açılışta sorsun"),
+        "  sudo "+prog+" "+G("set")+" "+Cy("--koruma setup --json")+D("  # yalnız koruma modunu değiştir (parola dokunma)"),
         "", B("DESTEKLENEN MODELLER:")]
     ex+=["  "+OK+f" {Cy(b)} / BIOS {Cy(v)}  {D('— '+PROFILES[(b,v)]['label'])}" for (b,v) in PROFILES]
     ex+=["", B("Programcı: ")+Cy("Özgür Koca")+D(" — ")+Cy("ozgurkoca.com"),
@@ -1218,6 +1264,9 @@ def build_parser():
     ps=sub.add_parser("set", help="parola ayarla, flash'a YAZAR", parents=[common])
     ps.add_argument("--yonetici", metavar="PAROLA", help="Yönetici parolası (parametreli/GUI; A-Z 0-9)")
     ps.add_argument("--kullanici", metavar="PAROLA", help="Kullanıcı parolası (parametreli/GUI; A-Z 0-9)")
+    ps.add_argument("--koruma", choices=["always","setup","acilis"], metavar="{always,setup}",
+                    help="Parola ne zaman sorulsun (GUI/makine sözleşmesi, read --json ile aynı): "
+                         "always=her açılışta, setup=yalnız BIOS setup (acilis=always eşanlamlı)")
     ps.add_argument("--out", metavar="DOSYA", help="yazılan imajı ayrıca kaydet")
     pcl=sub.add_parser("clear", help="parola temizle (flash'a YAZAR)", parents=[common])
     pcl.add_argument("slot", choices=["yonetici","kullanici","all"])
@@ -1245,6 +1294,7 @@ def _unified_usage():
        seçenekler: --list, --dry-run, --help
   eta-112.py bios <komut> [...]   BIOS parolası (etabios)
        komutlar: read | set | clear <slot> | info | calibrate | --json
+       set seçenekleri: --yonetici --kullanici --koruma {always,setup} --json
   eta-112.py --help               bu yardım""")
 
 
