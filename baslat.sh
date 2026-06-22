@@ -724,7 +724,7 @@ OK=G("✓"); WARN=Y("⚠"); ERR=R("✗")
 # modulundedir, dump'tan otomatik cikmaz; surume KILITLIDIR. Once 'calibrate'.
 PROFILES = {
     ("14MB37C1", "L0.30"): {
-        "model_name": "Faz 2 Vestel (Gri)",
+        "model_name": "Faz 2 Vestel AMD (Gri)",
         "label": "VESTEL 14MB37C1 / AMD A10-5750M, AMI Aptio",
         "chip": "W25Q64BV/W25Q64CV/W25Q64FV",
         "keystream": bytes.fromhex("5b93b62611ba6c4dc7e022747d07d89a332e8ec1e95444e89f7bfa0e55a2"),
@@ -739,8 +739,8 @@ PROFILES = {
         "verified": "2026-06-19 canli flashrom testleriyle dogrulandi",
     },
     ("14MB57", "4.6.5"): {
-        "model_name": "Vestel 14MB57 (Intel)",
-        "label": "VESTEL 14MB57 / Intel Core i3-4000M (Haswell, HM86), AMI Aptio",
+        "model_name": "Faz 2 Vestel Intel (Gri)",
+        "label": "VESTEL 14MB57 / Intel Core i3-4000M, AMI Aptio",
         # Intel: ME bolgesi kilitli -> flashrom --ifd ile yalniz BIOS bolgesi (opaque, -c yok)
         "chip": None, "flash_mode": "ifd",
         # 40-baytlik keystream: AMD'nin 30 bayti + 10 bayt uzanti (USER3/ADMIN12/2357236797B ile dogrulandi)
