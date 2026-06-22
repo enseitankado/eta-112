@@ -51,6 +51,7 @@ parolayla** giriş yapabilirsiniz.
 
 <!-- DESTEKLENEN-DONANIM:START (otomatik üretilir; elle düzenlemeyin) -->
 - **Faz 2 Vestel (Gri)** — VESTEL 14MB37C1 / AMD A10-5750M, AMI Aptio (BIOS L0.30)
+- **Vestel 14MB57 (Intel)** — VESTEL 14MB57 / Intel Core i3-4000M (Haswell, HM86), AMI Aptio (BIOS 4.6.5)
 <!-- DESTEKLENEN-DONANIM:END -->
 
 ---

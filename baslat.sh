@@ -733,9 +733,28 @@ PROFILES = {
         "amitse_glob": "/sys/firmware/efi/efivars/AMITSESetup-*",
         "setup_glob":  "/sys/firmware/efi/efivars/Setup-ec87d643-*",
         "pwcheck_off": 0x14D, "pwcheck_opts": {1: "Setup", 2: "Always"},
+        "store_len": 61, "setup_len": (330, 345), "flash_mode": "region",
         "active_store_end": 0x20000,
         "banks": [(0x0, 0x20000), (0x30000, 0x50000)],  # iki NVRAM bankası (reclaim ping-pong)
         "verified": "2026-06-19 canli flashrom testleriyle dogrulandi",
+    },
+    ("14MB57", "4.6.5"): {
+        "model_name": "Vestel 14MB57 (Intel)",
+        "label": "VESTEL 14MB57 / Intel Core i3-4000M (Haswell, HM86), AMI Aptio",
+        # Intel: ME bolgesi kilitli -> flashrom --ifd ile yalniz BIOS bolgesi (opaque, -c yok)
+        "chip": None, "flash_mode": "ifd",
+        # 40-baytlik keystream: AMD'nin 30 bayti + 10 bayt uzanti (USER3/ADMIN12/2357236797B ile dogrulandi)
+        "keystream": bytes.fromhex("5b93b62611ba6c4dc7e022747d07d89a332e8ec1e95444e89f7bfa0e55a2b0350bc9665cc1ef1c83"),
+        "slot_user": 0x00, "slot_super": 0x28, "slot_len": 40,
+        "store_len": 81,             # AMITSESetup parola blobu 81 bayt (user[40]+super[40]+bayrak[1])
+        "pw_min": 3, "pw_max": 20,   # slot 40 bayt = 20 karakter (UTF-16-LE)
+        "amitse_glob": "/sys/firmware/efi/efivars/AMITSESetup-*",  # bu makinede yok -> flashrom
+        "setup_glob":  "/sys/firmware/efi/efivars/Setup-ec87d643-*",
+        "pwcheck_off": 0x49F, "pwcheck_opts": {1: "Setup", 2: "Always"},  # 2026-06-22 toggle-diff
+        "setup_len": (1330, 1340),   # Setup NVAR blobu ~1336 bayt
+        "active_store_end": 0x440000,
+        "banks": [(0x400000, 0x420000), (0x420000, 0x440000)],  # iki NVRAM bankası (bitisik)
+        "verified": "2026-06-22 USER3/ADMIN12/2357236797B uc parola ile dogrulandi",
     },
 }
 
@@ -852,15 +871,47 @@ def _layout(end):
     f=tempfile.NamedTemporaryFile(prefix="etabios_lay_", suffix=".txt", delete=False, mode="w")
     f.write(f"00000000:{end-1:08x} nvram\n"); f.close(); return f.name
 
-def flashrom_read(chip, label="Okunuyor", show=True, region_end=None):
+# --- Intel /dev/mem kilidi (reboot'suz) ---
+# Intel cipsetlerinde STRICT_DEVMEM, SPI denetleyici MMIO'sunu (RCRB) bir cekirdek
+# surucusu claim'ledigi icin /dev/mem'i engeller. Asagidaki moduller SPI bolgesini
+# claim'ler; gecici kaldirip flashrom'u calistirir ve geri yukleriz (reboot gerekmez).
+_INTEL_SPI_MODS = ("iTCO_wdt", "iTCO_vendor_support", "lpc_ich")
+def _devmem_blocked(r):
+    txt = ((r.stderr or "") + (r.stdout or "")) if r else ""
+    return ("mmap failed" in txt) or ("Operation not permitted" in txt) or ("ICH RCRB" in txt)
+def _intel_spi_unlock():
+    removed=[]
+    for m in _INTEL_SPI_MODS:
+        if subprocess.run(["modprobe","-r",m], capture_output=True).returncode==0:
+            removed.append(m)
+    return removed
+def _intel_spi_restore(removed):
+    for m in reversed(removed):
+        subprocess.run(["modprobe", m], capture_output=True)
+def _run_flashrom(cmd, label, show, est):
+    """flashrom calistir; /dev/mem engeli (Intel) varsa modulleri gecici kaldirip yeniden dene."""
+    runit=lambda: subprocess.run(cmd, capture_output=True, text=True)
+    r = progress_timed(label, runit, est) if show else runit()
+    if _devmem_blocked(r):
+        removed=_intel_spi_unlock()
+        if removed:
+            try: r = progress_timed(label, runit, est) if show else runit()
+            finally: _intel_spi_restore(removed)
+    return r
+
+def flashrom_read(chip, label="Okunuyor", show=True, region_end=None, ifd=False):
     tmp=tempfile.NamedTemporaryFile(prefix="etabios_", suffix=".bin", delete=False).name
     lay=None
     try:
-        cmd=[_flashbin(),"-p","internal"]+(["-c",chip] if chip else [])
-        if region_end: lay=_layout(region_end); cmd+=["--layout",lay,"--image","nvram"]
+        cmd=[_flashbin(),"-p","internal"]
+        if ifd:
+            cmd+=["--ifd","-i","bios"]                  # Intel: ME bolgesi kilitli -> yalniz BIOS
+        else:
+            cmd+=(["-c",chip] if chip else [])
+            if region_end: lay=_layout(region_end); cmd+=["--layout",lay,"--image","nvram"]
         cmd+=["-r",tmp]
-        run=lambda: subprocess.run(cmd, capture_output=True, text=True)
-        r=progress_timed(label, run, 3 if region_end else 30) if show else run()
+        est = 25 if ifd else (3 if region_end else 30)
+        r=_run_flashrom(cmd, label, show, est)
         if not os.path.exists(tmp) or os.path.getsize(tmp)==0:
             return None, "\n".join((r.stderr or r.stdout).strip().splitlines()[-3:])
         return open(tmp,"rb").read(), None
@@ -870,17 +921,22 @@ def flashrom_read(chip, label="Okunuyor", show=True, region_end=None):
                 try: os.remove(f)
                 except OSError: pass
 
-def flashrom_write(chip, image_path, show=True, region_end=None, contents_path=None):
-    cmd=[_flashbin(),"-p","internal"]+(["-c",chip] if chip else [])
+def flashrom_write(chip, image_path, show=True, region_end=None, contents_path=None, ifd=False):
+    cmd=[_flashbin(),"-p","internal"]
     lay=None
-    if region_end:
-        # yalniz bolgeyi yaz/dogrula; --flash-contents ile 8MB on-okumayi atla
-        lay=_layout(region_end); cmd+=["--layout",lay,"-i","nvram","-N"]
-        if contents_path: cmd+=["--flash-contents",contents_path]
+    if ifd:
+        # Intel: yalniz BIOS bolgesini yaz; ME/descriptor kilitli oldugundan tum-cip
+        # dogrulamasini atla (yazilan bolge yine de dogrulanir).
+        cmd+=["--ifd","-i","bios","--noverify-all"]
+    else:
+        cmd+=(["-c",chip] if chip else [])
+        if region_end:
+            # yalniz bolgeyi yaz/dogrula; --flash-contents ile 8MB on-okumayi atla
+            lay=_layout(region_end); cmd+=["--layout",lay,"-i","nvram","-N"]
+            if contents_path: cmd+=["--flash-contents",contents_path]
     cmd+=["-w",image_path]
-    run=lambda: subprocess.run(cmd, capture_output=True, text=True)
     try:
-        r=progress_timed("Yazılıyor", run, 6 if region_end else 45) if show else run()
+        r=_run_flashrom(cmd, "Yazılıyor", show, 30 if ifd else (6 if region_end else 45))
     finally:
         if lay:
             try: os.remove(lay)
@@ -891,34 +947,35 @@ def flashrom_write(chip, image_path, show=True, region_end=None, contents_path=N
     return ok, tail
 
 # ===================== NVAR / efivars =====================
-def nvar_scan(data):
+def nvar_scan(data, store_len=61):
+    # store_len: parola store blob boyutu (AMD=61, Intel 14MB57=81)
     out=[]; n=len(data); NV=b"NVAR"; i=data.find(NV)
     while i!=-1 and i<n-10:
         size=struct.unpack("<H",data[i+4:i+6])[0]
-        if 8<size<0x400 and i+size<=n:
+        if 8<size<0x800 and i+size<=n:
             nxt=data[i+6]|(data[i+7]<<8)|(data[i+8]<<16); flags=data[i+9]; name=b""
             if flags&0x02:
                 end=data.find(b"\x00",i+11); doff=(end+1)-i if end!=-1 else 10
                 name=data[i+11:end] if end!=-1 else b""
             else: doff=10
-            if size-doff==61:
-                out.append({"off":i,"data_off":i+doff,"flags":flags,"next":nxt,"name":name,"blob":data[i+doff:i+doff+61]})
+            if size-doff==store_len:
+                out.append({"off":i,"data_off":i+doff,"flags":flags,"next":nxt,"name":name,"blob":data[i+doff:i+doff+store_len]})
             i=data.find(NV, i+size)
         else:
             i=data.find(NV, i+1)
     return out
 
-def nvar_setup_payload(data, active_end):
-    best=None; n=len(data); NV=b"NVAR"; i=data.find(NV)
+def nvar_setup_payload(data, active_end, setup_len=(330, 345)):
+    lo,hi=setup_len; best=None; n=len(data); NV=b"NVAR"; i=data.find(NV)
     while i!=-1 and i<n-10:
         size=struct.unpack("<H",data[i+4:i+6])[0]
-        if 8<size<0x400 and i+size<=n:
+        if 8<size<0x800 and i+size<=n:
             flags=data[i+9]
             if flags&0x02:
                 end=data.find(b"\x00",i+11); doff=(end+1)-i if end!=-1 else 10
             else: doff=10
             blob=data[i+doff:i+size]
-            if 330<=len(blob)<=345 and i<active_end: best=blob
+            if lo<=len(blob)<=hi and i<active_end: best=blob
             i=data.find(NV, i+size)
         else:
             i=data.find(NV, i+1)
@@ -928,7 +985,8 @@ def efivars_amitse(p):
     fs=glob.glob(p["amitse_glob"])
     if not fs: return None
     raw=open(fs[0],"rb").read()[4:]
-    return [{"off":0,"data_off":0,"flags":0x88,"next":0xFFFFFF,"blob":(raw+b"\x00"*61)[:61]}]
+    sl=p.get("store_len",61)
+    return [{"off":0,"data_off":0,"flags":0x88,"next":0xFFFFFF,"name":b"","blob":(raw+b"\x00"*sl)[:sl]}]
 
 def efivars_setup(p):
     fs=glob.glob(p["setup_glob"]); return open(fs[0],"rb").read()[4:] if fs else None
@@ -985,7 +1043,8 @@ def resolve_current(entries, banks):
 
 # ===================== KAYNAK =====================
 def _scan(data, prof):
-    return nvar_scan(data), nvar_setup_payload(data, prof["active_store_end"])
+    return (nvar_scan(data, prof.get("store_len",61)),
+            nvar_setup_payload(data, prof["active_store_end"], prof.get("setup_len",(330,345))))
 
 def load_source(prof, dumppath):
     if dumppath:
@@ -997,7 +1056,8 @@ def load_source(prof, dumppath):
     if os.geteuid()!=0:
         return None, None, "Bu makine icin 'sudo' gerekli."
     if not _JSON: print(f"  {D('Okunuyor...')}", flush=True)
-    data,err=flashrom_read(prof["chip"], show=False, region_end=max(hi for lo,hi in prof["banks"]))
+    data,err=flashrom_read(prof["chip"], show=False, region_end=max(hi for lo,hi in prof["banks"]),
+                           ifd=(prof.get("flash_mode")=="ifd"))
     if data is None: return None, None, err
     return (*_scan(data, prof), "flashrom")
 
@@ -1057,8 +1117,9 @@ def cmd_read(a):
         if key in seen: continue
         seen.add(key); prev.append((yon,kul))
     prot=None
-    if setup and len(setup)>prof["pwcheck_off"] and setup[prof["pwcheck_off"]] in (1,2):
-        prot="always" if setup[prof["pwcheck_off"]]==2 else "setup"
+    pco=prof.get("pwcheck_off")
+    if pco is not None and setup and len(setup)>pco and setup[pco] in (1,2):
+        prot="always" if setup[pco]==2 else "setup"
     if _JSON:
         return emit({"ok":True,"supported":True,"model":prof.get("model_name"),
                      "board":d.get("board"),"bios":d.get("bios_version"),
@@ -1084,12 +1145,12 @@ def cmd_calibrate(a):
     ents,_,src=load_source(pp, a.dump)
     if ents is None:
         return emit({"ok":False,"error":str(src)},1) if _JSON else (print(R("  "+str(src))) or 1)
-    off=0x00 if a.slot=="user" else 0x1E
-    blob=resolve_current(ents, pp["banks"]); cur=blob[off:off+30] if blob else None
-    if not cur or cur==b"\x00"*30:
+    off=pp["slot_user"] if a.slot=="user" else pp["slot_super"]; sl=pp["slot_len"]
+    blob=resolve_current(ents, pp["banks"]); cur=blob[off:off+sl] if blob else None
+    if not cur or cur==b"\x00"*sl:
         if _JSON: return emit({"ok":False,"error":"slot boş; önce BIOS'tan parola ayarlayın"},1)
         print(R(f"  {a.slot} slotu boş. Önce BIOS'tan bu parolayı ayarlayın.")); return 1
-    b=to_bios(a.password, 15); b=(b.encode("utf-16-le")+b"\x00"*30)[:30]
+    b=to_bios(a.password, pp["pw_max"]); b=(b.encode("utf-16-le")+b"\x00"*sl)[:sl]
     derived=bytes(x^y for x,y in zip(cur,b))
     matches=bool(prof and derived==prof["keystream"])
     if _JSON: return emit({"ok":True,"keystream":derived.hex(),"matches":matches})
@@ -1102,7 +1163,7 @@ def cmd_calibrate(a):
 # ----- yazma -----
 def _edit_image(data, prof, edits):
     data=bytearray(data); changes=[]
-    for e in nvar_scan(data):
+    for e in nvar_scan(data, prof.get("store_len",61)):
         if not any(lo<=e["off"]<hi for (lo,hi) in prof["banks"]): continue  # her iki banka
         for off,val in edits:
             a=e["data_off"]+off; old=bytes(data[a:a+prof["slot_len"]])
@@ -1115,15 +1176,15 @@ def _edit_setup_pwcheck(data, prof, value):
     girişlerinde (adlandırılmış 'Setup' + zincir devamı) ayarlar. 1=Setup, 2=Always.
     Bu profilde 330-345 baytlık tüm bloblar Setup'a aittir (boyut çakışması yok)."""
     data=bytearray(data); changes=[]; off=prof["pwcheck_off"]; n=len(data); NV=b"NVAR"
-    i=data.find(NV)
+    slo,shi=prof.get("setup_len",(330,345)); i=data.find(NV)
     while i!=-1 and i<n-10:
         size=struct.unpack("<H",data[i+4:i+6])[0]
-        if 8<size<0x400 and i+size<=n:
+        if 8<size<0x800 and i+size<=n:
             flags=data[i+9]
             if flags&0x02:
                 end=data.find(b"\x00",i+11); doff=(end+1)-i if end!=-1 else 10
             else: doff=10
-            if 330<=size-doff<=345 and any(lo<=i<hi for (lo,hi) in prof["banks"]):
+            if slo<=size-doff<=shi and any(lo<=i<hi for (lo,hi) in prof["banks"]):
                 a=i+doff+off
                 if i<a<i+size and data[a]!=value:
                     changes.append((a,data[a],value)); data[a]=value
@@ -1136,8 +1197,9 @@ def _write_flow(prof, edits, outpath, pwcheck=None):
     """Yaz (oku+düzenle+yaz) -> geri-oku doğrula. Doner: {ok,changed,error,verified}."""
     if os.geteuid()!=0: return {"ok":False,"changed":False,"error":"sudo gerekli"}
     RE=max(hi for lo,hi in prof["banks"]); sl=prof["slot_len"]
+    ifd=(prof.get("flash_mode")=="ifd")
     if not _JSON: print(f"  {D('Yazılıyor...')}", flush=True)
-    cur,err=flashrom_read(prof["chip"], show=False, region_end=RE)
+    cur,err=flashrom_read(prof["chip"], show=False, region_end=RE, ifd=ifd)
     if cur is None: return {"ok":False,"changed":False,"error":"okunamadı"}
     new,changes=_edit_image(cur, prof, edits)
     if pwcheck is not None:
@@ -1153,7 +1215,7 @@ def _write_flow(prof, edits, outpath, pwcheck=None):
     else:
         img=tempfile.NamedTemporaryFile(prefix="etabios_w_",suffix=".bin",delete=False).name
         open(img,"wb").write(new); keep=False
-    try: ok,_=flashrom_write(prof["chip"], img, show=False, region_end=RE, contents_path=cf)
+    try: ok,_=flashrom_write(prof["chip"], img, show=False, region_end=RE, contents_path=cf, ifd=ifd)
     finally:
         for f in ([cf] if keep else [cf,img]):
             try: os.remove(f)
@@ -1162,16 +1224,16 @@ def _write_flow(prof, edits, outpath, pwcheck=None):
     # geri-oku doğrula
     if not _JSON: print(f"  {D('Doğrulanıyor...')}", flush=True)
     verified=False
-    rb,_=flashrom_read(prof["chip"], show=False, region_end=RE)
+    rb,_=flashrom_read(prof["chip"], show=False, region_end=RE, ifd=ifd)
     if rb:
         edok=True
         if edits:
-            b=resolve_current(nvar_scan(rb), prof["banks"])
+            b=resolve_current(nvar_scan(rb, prof.get("store_len",61)), prof["banks"])
             edok=bool(b) and all(b[off:off+sl]==val for off,val in edits)
         pwok=True
         if pwcheck is not None:
-            sp=nvar_setup_payload(rb, prof["active_store_end"])
-            pwok=bool(sp) and len(sp)>prof["pwcheck_off"] and sp[prof["pwcheck_off"]]==pwcheck
+            sp=nvar_setup_payload(rb, prof["active_store_end"], prof.get("setup_len",(330,345)))
+            pwok=bool(sp) and prof.get("pwcheck_off") is not None and len(sp)>prof["pwcheck_off"] and sp[prof["pwcheck_off"]]==pwcheck
         verified=edok and pwok
     return {"ok":True,"changed":True,"error":None,"verified":verified}
 
@@ -1191,6 +1253,9 @@ def cmd_set(a):
     yon_arg=getattr(a,"yonetici",None); kul_arg=getattr(a,"kullanici",None)
     kor_arg=getattr(a,"koruma",None)
     if kor_arg: pwcheck={"always":2,"acilis":2,"setup":1}[kor_arg]   # 2=her açılışta, 1=yalnız setup
+    if pwcheck is not None and prof.get("pwcheck_off") is None:
+        msg="bu modelde 'koruma' (parola ne zaman sorulsun) henüz desteklenmiyor"
+        return emit({"ok":False,"error":msg},1) if _JSON else (print(Y("  "+msg)) or 1)
     if _JSON or yon_arg is not None or kul_arg is not None or kor_arg is not None:
         # parametreli (GUI/makine): degerleri dogrula
         for val,key,slot in ((yon_arg,"supervisor",prof["slot_super"]),(kul_arg,"user",prof["slot_user"])):
