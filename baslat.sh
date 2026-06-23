@@ -1631,7 +1631,7 @@ def etamac_main(argv):
         print("  eta-112.py mac read            # MAC(ler) + Faz OUI durumu (varsayılan)")
         print("  eta-112.py mac check <MAC>     # önerilen MAC Faz'a ait mi? (biçim+OUI)")
         print("  eta-112.py mac [--json]        # makine-okur çıktı")
-        print(D("  Not: kalıcı YAZMA henüz etkin değil (reboot doğrulaması bekliyor)."))
+        print(D("  Not: 'set' (flash-yazma) bu NIC'te ETKİSİZ — MAC Realtek eFuse'unda; devre dışı."))
         return 0
     cmd=args[0] if args else "read"
     class _A: pass
@@ -1643,10 +1643,11 @@ def etamac_main(argv):
             print(R("  Kullanım: mac check <MAC>")); return 1
         a=_A(); a.mac=args[1]; return cmd_mac_check(a) or 0
     if cmd in ("set","write","yaz","clear","temizle"):
-        msg=("MAC YAZMA henüz etkin değil: MAC, BIOS SPI flash NVRAM'inde bulundu (~0x3daee7) "
-             "fakat yazmanın NIC'e geçtiği reboot testiyle doğrulanmadı. Şimdilik yalnız "
-             "oku + doğrula; yazma bir sonraki adımda (doğrulamadan sonra) açılacak")
-        if _JSON: return emit({"ok":False,"error":"write_not_enabled","detail":msg},1)
+        msg=("MAC flash-yazma bu donanımda ETKİSİZ (2026-06-24 canlı test): MAC, BIOS SPI "
+             "flash NVRAM'inde (0x3daee7) yalnız PASİF bir kopyadır; Realtek RTL8168 gerçek "
+             "MAC'ini kendi eFuse/EEPROM'undan okur — flash'ı değiştirmek reboot sonrası MAC'i "
+             "DEĞİŞTİRMEDİ. Kalıcı donanım değişikliği NIC eFuse programlama gerektirir (ayrı/riskli)")
+        if _JSON: return emit({"ok":False,"error":"flash_write_ineffective","detail":msg},1)
         print(f"  {WARN} {Y(msg)}."); return 1
     die("Bilinmeyen mac komutu: %s   (read|check)" % cmd)
 
