@@ -6,9 +6,9 @@
 
 
 
-- **Kullanıcı parolası** — Bilgisayarda yüklü işletim sisteminde kayıtlı bir Linux hesabının (örn. `etapadmin`) **
-  parolasını yeni bir parolayla değiştirir.**
-- **BIOS parolası** — BIOS **yönetici/kullanıcı parolasını okur, ayarlar veya temizler**
+- **Kullanıcı parolası** — Kurulu işletim sisteminin kullanıcı hesaplarının (örn. `etapadmin`) **
+  parolasını değiştirir.**
+- **BIOS parolası** — BIOS **yönetici/kullanıcı parolasını görüntüler, ayarlar veya parolasını kaldırır**
   (yalnızca desteklenen akıllı tahta modellerinde).
 
 Hem **canlı (USB) ortamdan** hem de **çalışan sistemden** kullanılabilir.
@@ -50,8 +50,9 @@ parolayla** giriş yapabilirsiniz.
 **Desteklenen donanımlar:**
 
 <!-- DESTEKLENEN-DONANIM:START (otomatik üretilir; elle düzenlemeyin) -->
-- **Faz 2 Vestel AMD (Gri)** — VESTEL 14MB37C1 / AMD A10-5750M, AMI Aptio (BIOS L0.30)
-- **Faz 2 Vestel Intel (Gri)** — VESTEL 14MB57 / Intel Core i3-4000M, AMI Aptio (BIOS 4.6.5)
+- **Faz 1 Vestel Intel (Siyah)** — VESTEL 14MB24A / Intel Core i3-2310M, AMI Aptio (BIOS 4.6.5) (60.180 / %11,19 / 2026)
+- **Faz 2 Vestel AMD (Gri)** — VESTEL 14MB37C1 / AMD A10-5750M, AMI Aptio (BIOS L0.30) (53.733 / %9,99 / 2026)
+- **Faz 2 Vestel Intel (Gri)** — VESTEL 14MB57 / Intel Core i3-4000M, AMI Aptio (BIOS 4.6.5) (205.399 / %38,18 / 2026)
 <!-- DESTEKLENEN-DONANIM:END -->
 
 ---

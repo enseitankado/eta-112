@@ -696,6 +696,35 @@ OK=G("✓"); WARN=Y("⚠"); ERR=R("✗")
 # Yeni model eklemek: (kart, bios_surum) -> profil. keystream sikistirilmis AMITSE
 # modulundedir, dump'tan otomatik cikmaz; surume KILITLIDIR. Once 'calibrate'.
 PROFILES = {
+    ("14MB24A", "4.6.5"): {
+        "model_name": "Faz 1 Vestel Intel (Siyah)",
+        "label": "VESTEL 14MB24A / Intel Core i3-2310M, AMI Aptio",
+        # Intel Sandy Bridge (HM65): ME bolgesi kilitli -> flashrom --ifd ile yalniz BIOS bolgesi.
+        # SPI cip Macronix MX25L320x (4MB); flashrom coklu-eslesir -> -c sart.
+        # keystream AMI Aptio AMITSE sabiti (AMD 30 bayt = Intel ilk 30 bayt); 40 baytlik tam dizi.
+        "keystream": bytes.fromhex("5b93b62611ba6c4dc7e022747d07d89a332e8ec1e95444e89f7bfa0e55a2b0350bc9665cc1ef1c83"),
+        "slot_user": 0x00, "slot_super": 0x28, "slot_len": 40,   # AMITSESetup: user[40]+super[40]+bayrak
+        "store_len": 81,                                          # canli dump'tan dogrulandi (datalen=81)
+        "store_name": b"AMITSESetup",                            # 81-bayt NVAR'lar coklu -> adla ayikla
+
+        "pw_min": 3, "pw_max": 20,                                # slot 40 bayt = 20 karakter (UTF-16-LE)
+        "chip": "MX25L3206E/MX25L3208E", "flash_mode": "ifd",
+        "amitse_glob": "/sys/firmware/efi/efivars/AMITSESetup-*",  # legacy: yok -> flashrom
+        "setup_glob":  "/sys/firmware/efi/efivars/Setup-ec87d643-*",
+        # pwcheck (parola ne zaman sorulsun) BIOS toggle-diff ile bulunur; fiziksel BIOS
+        # erisimi gerektigi icin henuz kalibre edilmedi -> 'koruma' destegi kapali.
+        "pwcheck_off": None, "pwcheck_opts": {1: "Setup", 2: "Always"},
+        "setup_len": (545, 555),                                 # ana Setup NVAR datalen=549
+        "active_store_end": 0x220000,                            # iki NVRAM bankasinin sonu
+        "banks": [(0x200000, 0x210000), (0x210000, 0x220000)],   # iki NVRAM bankasi (64KB ping-pong)
+        "verified": "2026-06-24 canli UCTAN UCA dogrulandi (flashrom --ifd + otomatik PNP0C02 unbind): "
+                    "read 2357236797B/2357236797C dogru cozdu; set ADMINTEST/USERTEST yazildi+geri-oku "
+                    "dogrulandi; clear all temizledi+dogrulandi. store_len=81, slot_len=40, banklar "
+                    "0x200000/0x210000, MX25L320x (4MB) -c sart. Erisim: IO_STRICT_DEVMEM RCBA'yi "
+                    "(PNP0C02) kapatir -> arac flashrom oncesi system aygitini unbind/rebind eder "
+                    "(iomem=relaxed/reboot GEREKMEZ). pwcheck (koruma) bu modelde YOK; davranis ortuk "
+                    "(yalniz Yonetici=setup, Kullanici varsa her acilis).",
+    },
     ("14MB37C1", "L0.30"): {
         "model_name": "Faz 2 Vestel AMD (Gri)",
         "label": "VESTEL 14MB37C1 / AMD A10-5750M, AMI Aptio",
@@ -861,15 +890,53 @@ def _intel_spi_unlock():
 def _intel_spi_restore(removed):
     for m in reversed(removed):
         subprocess.run(["modprobe", m], capture_output=True)
+
+# --- PNP0C02 (anakart kaynak aygiti) unbind ---
+# Bazi BIOS'lar (or. 14MB24A) RCBA/SPI MMIO'sunu bir PNP0C02 'system' aygitina kaynak
+# olarak bildirir. IO_STRICT_DEVMEM bu "busy" bolgeyi /dev/mem'e kapatir; modul kaldirmak
+# YETMEZ -> PNP aygitini gecici unbind edip flashrom sonrasi geri bind ederiz (reboot yok).
+_PNP_SYSDRV = "/sys/bus/pnp/drivers/system"
+def _rcrb_addr(r):
+    """flashrom hata metninden engellenen MMIO adresini cikar (yoksa tipik RCBA 0xfed1c000)."""
+    import re
+    txt = ((r.stderr or "") + (r.stdout or "")) if r else ""
+    m = re.search(r"RCRB[^0]*0x0*([0-9a-fA-F]+)", txt) or re.search(r"at 0x0*([0-9a-fA-F]+)", txt)
+    try: return int(m.group(1), 16) if m else 0xfed1c000
+    except (ValueError, AttributeError): return 0xfed1c000
+def _pnp_unbind_holding(addr):
+    """addr'i mem kaynagi olarak tutan PNP 'system' aygitini unbind eder; dev adini doner."""
+    import re
+    if not os.path.isdir(_PNP_SYSDRV): return None
+    for d in glob.glob("/sys/bus/pnp/devices/*/"):
+        try: res = open(os.path.join(d, "resources")).read()
+        except OSError: continue
+        holds = any((int(m.group(1),16) <= addr <= int(m.group(2),16))
+                    for m in re.finditer(r"mem\s+0x([0-9a-fA-F]+)-0x([0-9a-fA-F]+)", res))
+        if holds:
+            dev = os.path.basename(d.rstrip("/"))
+            try:
+                with open(os.path.join(_PNP_SYSDRV, "unbind"), "w") as f: f.write(dev)
+                return dev
+            except OSError: return None
+    return None
+def _pnp_rebind(dev):
+    if not dev: return
+    try:
+        with open(os.path.join(_PNP_SYSDRV, "bind"), "w") as f: f.write(dev)
+    except OSError: pass
+
 def _run_flashrom(cmd, label, show, est):
-    """flashrom calistir; /dev/mem engeli (Intel) varsa modulleri gecici kaldirip yeniden dene."""
+    """flashrom calistir; /dev/mem engeli (Intel) varsa modulleri kaldir + RCBA'yi tutan
+    PNP0C02 aygitini gecici unbind edip yeniden dene; sonra hepsini geri yukle (reboot yok)."""
     runit=lambda: subprocess.run(cmd, capture_output=True, text=True)
     r = progress_timed(label, runit, est) if show else runit()
     if _devmem_blocked(r):
         removed=_intel_spi_unlock()
-        if removed:
+        pnp=_pnp_unbind_holding(_rcrb_addr(r))   # PNP0C02 RCBA'yi tutuyorsa serbest birak
+        if removed or pnp:
             try: r = progress_timed(label, runit, est) if show else runit()
-            finally: _intel_spi_restore(removed)
+            finally:
+                _pnp_rebind(pnp); _intel_spi_restore(removed)
     return r
 
 def flashrom_read(chip, label="Okunuyor", show=True, region_end=None, ifd=False):
@@ -878,6 +945,7 @@ def flashrom_read(chip, label="Okunuyor", show=True, region_end=None, ifd=False)
     try:
         cmd=[_flashbin(),"-p","internal"]
         if ifd:
+            cmd+=(["-c",chip] if chip else [])          # coklu-cip eslesmesinde -c sart ( or. MX25L320x)
             cmd+=["--ifd","-i","bios"]                  # Intel: ME bolgesi kilitli -> yalniz BIOS
         else:
             cmd+=(["-c",chip] if chip else [])
@@ -900,6 +968,7 @@ def flashrom_write(chip, image_path, show=True, region_end=None, contents_path=N
     if ifd:
         # Intel: yalniz BIOS bolgesini yaz; ME/descriptor kilitli oldugundan tum-cip
         # dogrulamasini atla (yazilan bolge yine de dogrulanir).
+        cmd+=(["-c",chip] if chip else [])             # coklu-cip eslesmesinde -c sart
         cmd+=["--ifd","-i","bios","--noverify-all"]
     else:
         cmd+=(["-c",chip] if chip else [])
@@ -1045,6 +1114,9 @@ def need_profile():
     print(f"  BIOS : {d.get('bios_vendor','?')} sürüm {Cy(d.get('bios_version','?'))}")
     if prof:
         print(f"  Durum: {OK} {G('DESTEKLENİYOR')}  {D('('+prof['label']+')')}")
+        if prof.get("calib_pending"):
+            print(f"         {WARN} {Y('YAZMA KALİBRASYON BEKLİYOR')} — okuma açık; set/clear kilitli "
+                  + D("(offsetler canlı dump ile doğrulanmalı)."))
     else:
         same=[k for k in PROFILES if k[0]==d.get("board")]
         if same:
@@ -1076,6 +1148,7 @@ def cmd_read(a):
     if ents is None:
         if _JSON: return emit({"ok":False,"error":str(src)},1)
         print(R("  "+str(src))); return 1
+    ents=_pw_filter(ents, prof)
     ks=prof["keystream"]; su,sp,sl=prof["slot_user"],prof["slot_super"],prof["slot_len"]
     cur=resolve_current(ents, prof["banks"])
     du=decode(cur[su:su+sl],ks) if cur else None
@@ -1093,6 +1166,10 @@ def cmd_read(a):
     pco=prof.get("pwcheck_off")
     if pco is not None and setup and len(setup)>pco and setup[pco] in (1,2):
         prot="always" if setup[pco]==2 else "setup"
+    elif pco is None:
+        # Bu modelde ayri 'parola ne zaman sorulsun' bayti YOK; davranis hangi parolanin
+        # ayarli oldguna gore ortuk: Kullanici varsa her acilis; yalniz Yonetici varsa setup.
+        prot="always" if du else ("setup" if ds else None)
     if _JSON:
         return emit({"ok":True,"supported":True,"model":prof.get("model_name"),
                      "board":d.get("board"),"bios":d.get("bios_version"),
@@ -1108,7 +1185,14 @@ def cmd_read(a):
         print(B("\nÖnceki parolalar"))
         for i,(yon,kul) in enumerate(prev,1):
             print(f"  {D(str(i)+'.'):<3} Yönetici: {(yon or '-'):<14} Kullanıcı: {(kul or '-')}")
-    kor=(Y("her açılışta sorulur") if prot=="always" else G("yalnızca BIOS ayarlarına girerken sorulur")) if prot else D("okunamadı")
+    if prof.get("pwcheck_off") is None:
+        # ortuk davranis (ayar bayti yok): hangi parola ayarliysa ona gore
+        kor=(Y("her açılışta sorulur") + D("  (Kullanıcı parolası ayarlı)")) if prot=="always" \
+            else (G("yalnızca BIOS ayarlarına girerken sorulur") + D("  (yalnız Yönetici ayarlı)")) if prot=="setup" \
+            else D("parola ayarlı değil")
+        kor += D("  — bu modelde ayrı 'ne zaman sorulsun' ayarı yoktur")
+    else:
+        kor=(Y("her açılışta sorulur") if prot=="always" else G("yalnızca BIOS ayarlarına girerken sorulur")) if prot else D("okunamadı")
     print(f"\n  {D('Koruma:')} {kor}")
     return 0
 
@@ -1118,6 +1202,7 @@ def cmd_calibrate(a):
     ents,_,src=load_source(pp, a.dump)
     if ents is None:
         return emit({"ok":False,"error":str(src)},1) if _JSON else (print(R("  "+str(src))) or 1)
+    ents=_pw_filter(ents, pp)
     off=pp["slot_user"] if a.slot=="user" else pp["slot_super"]; sl=pp["slot_len"]
     blob=resolve_current(ents, pp["banks"]); cur=blob[off:off+sl] if blob else None
     if not cur or cur==b"\x00"*sl:
@@ -1134,9 +1219,17 @@ def cmd_calibrate(a):
     return 0
 
 # ----- yazma -----
+def _pw_filter(entries, prof):
+    """Parola store'unu adiyla ayikla. Bazi kartlarda (or. 14MB24A) store_len=81
+    AMITSESetup'a OZGU degil; baska NVAR'lar da ayni boyutta. store_name verilirse
+    yalniz o ada sahip girisler donulur (yanlis blob okuma / yanlis yere yazma onlenir).
+    store_name yoksa davranis degismez (AMD/Intel profilleri etkilenmez)."""
+    nm=prof.get("store_name")
+    return [e for e in entries if e["name"]==nm] if nm else entries
+
 def _edit_image(data, prof, edits):
     data=bytearray(data); changes=[]
-    for e in nvar_scan(data, prof.get("store_len",61)):
+    for e in _pw_filter(nvar_scan(data, prof.get("store_len",61)), prof):
         if not any(lo<=e["off"]<hi for (lo,hi) in prof["banks"]): continue  # her iki banka
         for off,val in edits:
             a=e["data_off"]+off; old=bytes(data[a:a+prof["slot_len"]])
@@ -1174,6 +1267,13 @@ def _write_flow(prof, edits, outpath, pwcheck=None):
     if not _JSON: print(f"  {D('Yazılıyor...')}", flush=True)
     cur,err=flashrom_read(prof["chip"], show=False, region_end=RE, ifd=ifd)
     if cur is None: return {"ok":False,"changed":False,"error":"okunamadı"}
+    if prof.get("store_name"):
+        # store_name'li kartlarda yazma hedefi CANLI AMITSESetup NVAR'idir. Parola hic
+        # kurulmadiysa bu degisken yoktur (yalniz StdDefaults icinde varsayilan kopya).
+        # Bos slota uydurma yazmak yerine net yonlendirme don.
+        live=[e for e in _pw_filter(nvar_scan(cur, prof.get("store_len",61)), prof)
+              if any(lo<=e["off"]<hi for (lo,hi) in prof["banks"])]
+        if not live: return {"ok":False,"changed":False,"error":"no_live_store"}
     new,changes=_edit_image(cur, prof, edits)
     if pwcheck is not None:
         new,pchanges=_edit_setup_pwcheck(new, prof, pwcheck); changes=changes+pchanges
@@ -1201,7 +1301,7 @@ def _write_flow(prof, edits, outpath, pwcheck=None):
     if rb:
         edok=True
         if edits:
-            b=resolve_current(nvar_scan(rb, prof.get("store_len",61)), prof["banks"])
+            b=resolve_current(_pw_filter(nvar_scan(rb, prof.get("store_len",61)), prof), prof["banks"])
             edok=bool(b) and all(b[off:off+sl]==val for off,val in edits)
         pwok=True
         if pwcheck is not None:
@@ -1212,15 +1312,31 @@ def _write_flow(prof, edits, outpath, pwcheck=None):
 
 def _write_result_print(res):
     if res["error"]=="sudo gerekli": print(R("  Bunun için 'sudo' gerekli."))
+    elif res["error"]=="no_live_store":
+        print(Y("  BIOS'ta henüz hiç parola kurulmamış (AMITSESetup değişkeni oluşmamış)."))
+        print(D("  Önce BIOS setup'a girip herhangi bir parola ayarlayıp kaydedin (F10);"))
+        print(D("  değişken oluştuktan sonra bu araçla oku/ayarla/temizle tam çalışır."))
     elif res["error"]:               print(R(f"  İşlem başarısız: {res['error']}."))
     elif not res["changed"]:         print(Y("  Parolalar zaten istenen durumda."))
     elif not res.get("verified", True): print(f"  {WARN} {Y('Yazıldı ama doğrulama tutmadı.')}")
     else: print(f"  {OK} {G('Tamam.')}")
 
+def _calib_guard(prof):
+    """calib_pending profillerde YAZMA'yi engeller: offsetler bu kartin canli
+    dump'undan dogrulanmadan flash'a yazilmaz (brick riski). Okuma serbesttir."""
+    if not prof.get("calib_pending"): return None
+    msg=("bu model icin yazma kalibrasyon bekliyor; offsetler canli dump ile "
+         "dogrulanmadan flash'a yazilmaz. Once: sudo flashrom ... -r dump.bin "
+         "ve 'calibrate' ile profili kesinlestirin")
+    if _JSON: return emit({"ok":False,"calib_pending":True,"error":msg},1)
+    print(f"  {WARN} {Y(msg)}."); return 1
+
 def cmd_set(a):
     prof,_=need_profile()
     if not prof:
         return emit({"ok":False,"error":"desteklenmeyen model"},1) if _JSON else 1
+    g=_calib_guard(prof)
+    if g is not None: return g
     ks=prof["keystream"]; pmin,pmax=prof["pw_min"],prof["pw_max"]
     edits=[]; shown={}; pwcheck=None
     yon_arg=getattr(a,"yonetici",None); kul_arg=getattr(a,"kullanici",None)
@@ -1280,6 +1396,8 @@ def cmd_clear(a):
     prof,_=need_profile()
     if not prof:
         return emit({"ok":False,"error":"desteklenmeyen model"},1) if _JSON else 1
+    g=_calib_guard(prof)
+    if g is not None: return g
     z=b"\x00"*prof["slot_len"]
     edits={"all":[(prof["slot_user"],z),(prof["slot_super"],z)],
            "kullanici":[(prof["slot_user"],z)], "yonetici":[(prof["slot_super"],z)]}[a.slot]
