@@ -1387,12 +1387,18 @@ def cmd_set(a):
     else:
         # etkilesimli (tus tus, BUYUK harf)
         print(B("\nParola ayarla ")+D("(boş bırakırsan o parola değişmez)"))
+        if prof.get("pwcheck_off") is None:
+            # Bu modelde "ne zaman sorulsun" (setup/always) BIOS secenegi YOK; davranis
+            # hangi parolayi ayarladigina gore belirlenir. Kullaniciya kisaca hatirlat.
+            print(D("  Hangi parolayı ayarladığın, parolanın ne zaman sorulacağını belirler:"))
+            print(D("    • ")+Cy("Yönetici")+D(" — yalnız BIOS ayarlarına girişi korur (sistem normal açılır)"))
+            print(D("    • ")+Cy("Kullanıcı")+D(" — her açılışta sorulur (sistemi açılışta kilitler)"))
         for lbl,key,slot in (("Yönetici","supervisor",prof["slot_super"]),("Kullanıcı","user",prof["slot_user"])):
             raw=read_pw_keys(f"{lbl} parolası", pmin, pmax)
             if not raw: continue
             if len(raw)<pmin: print(R(f"    En az {pmin} karakter olmalı; atlandı.")); continue
             v=to_bios(raw, pmax); edits.append((slot, obf(v, ks))); shown[key]=trq(v)
-        if "supervisor" in shown:
+        if "supervisor" in shown and prof.get("pwcheck_off") is not None:
             print(D("\n  Yönetici parolası ne zaman sorulsun? ")+D("(boş = değiştirme)"))
             print("    1) "+G("Her açılışta"))
             print("    2) "+G("Yalnız BIOS ayarlarına girerken"))
