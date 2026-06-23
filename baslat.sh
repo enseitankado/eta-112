@@ -744,19 +744,12 @@ PROFILES = {
         "setup_len": (545, 555),                                 # ana Setup NVAR datalen=549
         "active_store_end": 0x220000,                            # iki NVRAM bankasinin sonu
         "banks": [(0x200000, 0x210000), (0x210000, 0x220000)],   # iki NVRAM bankasi (64KB ping-pong)
-        # --- MAC adresi dogrulamasi (onboard NIC: Realtek RTL8168) ---
-        # Faz1 OUI beyaz listesi etapi/all_boards.json'dan TURETILDI (motherboard_id=7,
-        # 60.176 cihaz): iki vendor ailesi -> Vestel + Elitegroup, kapsama %99.96.
-        # (Geri kalan ~23 kayit: 00:E0:4C Realtek-varsayilan + tekil/locally-administered
-        # rastgele MAC'ler = gurultu, listeye alinmadi.) MAC, BIOS SPI flash NVRAM'inde
-        # ~0x3daee7'de tutulur; YAZMA henuz dogrulanmadi -> simdilik salt-okuma + dogrulama.
-        "mac_ouis": {
-            "00:09:DF": "Vestel Elektronik",      # %95.87 (57.692)
-            "F4:4D:30": "Elitegroup (ECS)",       # %2.25  (1.354)
-            "B8:AE:ED": "Elitegroup (ECS)",       # %1.14  (684)
-            "C0:3F:D5": "Elitegroup (ECS)",       # %0.69  (413)
-            "C8:9C:DC": "Elitegroup (ECS)",       # %0.02  (10)
-        },
+        # --- MAC adresi (onboard NIC: Realtek RTL8168) ---
+        # OUI beyaz listesi: YALNIZ Vestel 00:09:DF (kullanici karari). etapi/all_boards.json'a
+        # gore Faz1'in (motherboard_id=7, 60.176 cihaz) %95.87'si 00:09:DF; kalan Elitegroup
+        # (F4:4D:30/B8:AE:ED/C0:3F:D5/C8:9C:DC ~%4) + tekil/rastgele kayitlar liste DISI birakildi.
+        # MAC, BIOS SPI flash NVRAM'inde (~0x3daee7) tutulur.
+        "mac_ouis": {"00:09:DF": "Vestel Elektronik"},
         "verified": "2026-06-24 canli UCTAN UCA dogrulandi (flashrom --ifd + otomatik PNP0C02 unbind): "
                     "read 2357236797B/2357236797C dogru cozdu; set ADMINTEST/USERTEST yazildi+geri-oku "
                     "dogrulandi; clear all temizledi+dogrulandi. store_len=81, slot_len=40, banklar "
@@ -778,6 +771,9 @@ PROFILES = {
         "store_len": 61, "setup_len": (330, 345), "flash_mode": "region",
         "active_store_end": 0x20000,
         "banks": [(0x0, 0x20000), (0x30000, 0x50000)],  # iki NVRAM bankası (reclaim ping-pong)
+        # MAC OUI beyaz listesi (hazirda): yalniz Vestel 00:09:DF. etapi/all_boards.json'a gore
+        # Faz2 AMD (motherboard_id=9, 53.720 cihaz) %99.83 00:09:DF; kalan <%0.2 degisim/gurultu.
+        "mac_ouis": {"00:09:DF": "Vestel Elektronik"},
         "verified": "2026-06-19 canli flashrom testleriyle dogrulandi",
     },
     ("14MB57", "4.6.5"): {
@@ -796,6 +792,9 @@ PROFILES = {
         "setup_len": (1330, 1340),   # Setup NVAR blobu ~1336 bayt
         "active_store_end": 0x440000,
         "banks": [(0x400000, 0x420000), (0x420000, 0x440000)],  # iki NVRAM bankası (bitisik)
+        # MAC OUI beyaz listesi (hazirda): yalniz Vestel 00:09:DF. etapi/all_boards.json'a gore
+        # Faz2 Intel (motherboard_id=5, 205.399 cihaz) %99.74 00:09:DF; kalan <%0.3 degisim/gurultu.
+        "mac_ouis": {"00:09:DF": "Vestel Elektronik"},
         "verified": "2026-06-22 USER3/ADMIN12/2357236797B uc parola ile dogrulandi",
     },
 }
