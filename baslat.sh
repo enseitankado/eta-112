@@ -744,6 +744,19 @@ PROFILES = {
         "setup_len": (545, 555),                                 # ana Setup NVAR datalen=549
         "active_store_end": 0x220000,                            # iki NVRAM bankasinin sonu
         "banks": [(0x200000, 0x210000), (0x210000, 0x220000)],   # iki NVRAM bankasi (64KB ping-pong)
+        # --- MAC adresi dogrulamasi (onboard NIC: Realtek RTL8168) ---
+        # Faz1 OUI beyaz listesi etapi/all_boards.json'dan TURETILDI (motherboard_id=7,
+        # 60.176 cihaz): iki vendor ailesi -> Vestel + Elitegroup, kapsama %99.96.
+        # (Geri kalan ~23 kayit: 00:E0:4C Realtek-varsayilan + tekil/locally-administered
+        # rastgele MAC'ler = gurultu, listeye alinmadi.) MAC, BIOS SPI flash NVRAM'inde
+        # ~0x3daee7'de tutulur; YAZMA henuz dogrulanmadi -> simdilik salt-okuma + dogrulama.
+        "mac_ouis": {
+            "00:09:DF": "Vestel Elektronik",      # %95.87 (57.692)
+            "F4:4D:30": "Elitegroup (ECS)",       # %2.25  (1.354)
+            "B8:AE:ED": "Elitegroup (ECS)",       # %1.14  (684)
+            "C0:3F:D5": "Elitegroup (ECS)",       # %0.69  (413)
+            "C8:9C:DC": "Elitegroup (ECS)",       # %0.02  (10)
+        },
         "verified": "2026-06-24 canli UCTAN UCA dogrulandi (flashrom --ifd + otomatik PNP0C02 unbind): "
                     "read 2357236797B/2357236797C dogru cozdu; set ADMINTEST/USERTEST yazildi+geri-oku "
                     "dogrulandi; clear all temizledi+dogrulandi. store_len=81, slot_len=40, banklar "
@@ -1501,6 +1514,144 @@ def etabios_main(argv):
             "set":cmd_set,"clear":cmd_clear}[a.cmd](a) or 0
 
 
+# ===================== BÖLÜM 3: MAC ADRESİ (etamac) =====================
+# Onboard ethernet MAC'ini OKUR ve onerilen bir MAC'i Faz profili OUI beyaz
+# listesine (profil['mac_ouis']) gore DOGRULAR. Amac: kullanicinin Faz'a ait
+# OLMAYAN bir MAC tanimlamasini engellemek. YAZMA henuz etkin degil (MAC SPI
+# flash NVRAM'inde bulundu fakat yazmanin NIC'e gectigi reboot testiyle
+# dogrulanmadi) -> 'set' net bir erteleme mesaji doner.
+
+def _dmi_sysfs():
+    """dmidecode (root) olmadan da model saptamak icin /sys/class/dmi/id."""
+    g=lambda f: (open("/sys/class/dmi/id/"+f).read().strip()
+                 if os.path.exists("/sys/class/dmi/id/"+f) else "")
+    return {"board":g("board_name"),"bios_version":g("bios_version"),
+            "board_mfr":g("board_vendor"),"bios_vendor":g("bios_vendor")}
+
+def _mac_profile():
+    """MAC komutlari icin profil: once dmidecode, board bossa sysfs'e dus (root'suz)."""
+    d=dmi()
+    if not d.get("board"): d=_dmi_sysfs()
+    return match_profile(d), d
+
+def _norm_mac(s):
+    """Girisi 'AA:BB:CC:DD:EE:FF' (BUYUK) bicimine getirir; gecersizse None.
+    Ayirici : - . veya bitisik kabul eder."""
+    if not s: return None
+    h="".join(c for c in s if c in "0123456789abcdefABCDEF")
+    if len(h)!=12: return None
+    return ":".join(h[i:i+2] for i in range(0,12,2)).upper()
+
+def _mac_oui(mac): return mac[:8] if mac else None      # 'AA:BB:CC'
+
+def validate_mac(mac_in, prof):
+    """Onerilen MAC'i dogrular. Doner: (ok, normalized, oui, vendor, reason)."""
+    ouis=(prof or {}).get("mac_ouis")
+    m=_norm_mac(mac_in)
+    if not m: return (False, None, None, None, "biçim geçersiz (12 onaltılık hane gerekir)")
+    first=int(m[:2],16)
+    if m=="00:00:00:00:00:00": return (False,m,None,None,"hepsi-sıfır MAC geçersiz")
+    if m=="FF:FF:FF:FF:FF:FF": return (False,m,_mac_oui(m),None,"broadcast MAC geçersiz")
+    if first&1: return (False,m,_mac_oui(m),None,"çok-noktalı (multicast) adres — NIC MAC'i olamaz")
+    oui=_mac_oui(m)
+    if ouis is None:
+        return (False,m,oui,None,"bu model için Faz OUI doğrulaması tanımlı değil")
+    if first&2:
+        return (False,m,oui,None,"yerel-yönetimli (rastgele) adres — Faz cihazları global OUI kullanır")
+    if oui not in ouis:
+        return (False,m,oui,None,"OUI %s Faz'a ait değil (izinli: %s)"%(oui, ", ".join(ouis)))
+    return (True,m,oui,ouis[oui],None)
+
+def _eth_ifaces():
+    """Kablolu ethernet arayuzleri: [(ifc, mac, driver)]; wifi/sanal haric."""
+    out=[]; base="/sys/class/net"
+    try: names=sorted(os.listdir(base))
+    except OSError: return out
+    for ifc in names:
+        if ifc=="lo": continue
+        d=os.path.join(base,ifc)
+        if os.path.exists(os.path.join(d,"wireless")) or os.path.exists(os.path.join(d,"phy80211")):
+            continue
+        try:
+            if open(os.path.join(d,"type")).read().strip()!="1": continue   # ARPHRD_ETHER
+        except OSError: continue
+        if not os.path.exists(os.path.join(d,"device")): continue           # sanal arayuzleri ele
+        try: mac=open(os.path.join(d,"address")).read().strip().upper()
+        except OSError: mac=""
+        try: drv=os.path.basename(os.path.realpath(os.path.join(d,"device","driver")))
+        except OSError: drv=""
+        out.append((ifc, mac, drv))
+    return out
+
+def cmd_mac_read(a):
+    prof,d=_mac_profile(); ouis=(prof or {}).get("mac_ouis")
+    ifs=_eth_ifaces()
+    if _JSON:
+        items=[{"iface":i,"mac":m,"driver":v,"oui":_mac_oui(m),
+                "vendor":(ouis or {}).get(_mac_oui(m)),
+                "faz_uyumlu":bool(ouis and _mac_oui(m) in ouis)} for i,m,v in ifs]
+        return emit({"ok":True,"supported":bool(prof),
+                     "model":(prof or {}).get("model_name"),"board":d.get("board"),
+                     "interfaces":items,"allowed_ouis":ouis})
+    print(f"  Model: {G(prof['model_name']) if prof else Y('(tanınmadı)')}  "
+          f"{D('Kart '+str(d.get('board','?')))}")
+    if not ifs:
+        print(R("  Kablolu ethernet arayüzü bulunamadı.")); return 1
+    print(B("\nEthernet MAC adresleri"))
+    for ifc,mac,drv in ifs:
+        oui=_mac_oui(mac)
+        if ouis and oui in ouis:   tag=f"{OK} {G('Faz OUI')} {D('('+ouis[oui]+')')}"
+        elif ouis:                 tag=f"{WARN} {Y('Faz OUI değil')}"
+        else:                      tag=D("(model profili yok)")
+        print(f"  {ifc:<10} {Cy(mac)}  {D('['+drv+']')}  {tag}")
+    if ouis:
+        print(D("\n  İzinli Faz OUI: ")+", ".join("%s (%s)"%(o,v) for o,v in ouis.items()))
+    else:
+        print(D("\n  (Bu model için OUI beyaz listesi tanımlı değil.)"))
+    return 0
+
+def cmd_mac_check(a):
+    prof,_=_mac_profile()
+    ok,m,oui,vendor,reason=validate_mac(a.mac, prof)
+    if _JSON:
+        return emit({"ok":ok,"mac":m,"oui":oui,"vendor":vendor,"reason":reason}, 0 if ok else 1)
+    if ok:
+        print(f"  {OK} {G('Geçerli Faz MAC')}: {Cy(m)}  {D('OUI '+oui+' — '+vendor)}")
+        return 0
+    print(f"  {ERR} {R('Geçersiz MAC')}: {a.mac}")
+    if m: print(D("     normalize: %s%s"%(m, "  OUI "+oui if oui else "")))
+    print(f"     {Y('neden: '+reason)}")
+    return 1
+
+def etamac_main(argv):
+    global _JSON
+    args=list(argv)
+    if "--json" in args: _JSON=True; args=[x for x in args if x!="--json"]
+    if args and args[0] in ("-h","--help","yardim"):
+        print(B("eta-112.py mac")+" — onboard ethernet MAC oku / doğrula")
+        print("  eta-112.py mac read            # MAC(ler) + Faz OUI durumu (varsayılan)")
+        print("  eta-112.py mac check <MAC>     # önerilen MAC Faz'a ait mi? (biçim+OUI)")
+        print("  eta-112.py mac [--json]        # makine-okur çıktı")
+        print(D("  Not: kalıcı YAZMA henüz etkin değil (reboot doğrulaması bekliyor)."))
+        return 0
+    cmd=args[0] if args else "read"
+    class _A: pass
+    if cmd in ("read","oku"):
+        return cmd_mac_read(_A()) or 0
+    if cmd in ("check","dogrula","validate","kontrol"):
+        if len(args)<2:
+            if _JSON: return emit({"ok":False,"error":"mac argümanı gerekli"},1)
+            print(R("  Kullanım: mac check <MAC>")); return 1
+        a=_A(); a.mac=args[1]; return cmd_mac_check(a) or 0
+    if cmd in ("set","write","yaz","clear","temizle"):
+        msg=("MAC YAZMA henüz etkin değil: MAC, BIOS SPI flash NVRAM'inde bulundu (~0x3daee7) "
+             "fakat yazmanın NIC'e geçtiği reboot testiyle doğrulanmadı. Şimdilik yalnız "
+             "oku + doğrula; yazma bir sonraki adımda (doğrulamadan sonra) açılacak")
+        if _JSON: return emit({"ok":False,"error":"write_not_enabled","detail":msg},1)
+        print(f"  {WARN} {Y(msg)}."); return 1
+    die("Bilinmeyen mac komutu: %s   (read|check)" % cmd)
+
+
 # ===================== BİRLEŞİK DAĞITICI =====================
 def _unified_usage():
     print(C.B + "ETA-112 — Birleşik Parola Aracı" + C.R)
@@ -1511,6 +1662,8 @@ def _unified_usage():
   eta-112.py bios <komut> [...]   BIOS parolası (etabios)
        komutlar: read | set | clear <slot> | info | calibrate | --json
        set seçenekleri: --yonetici --kullanici --koruma {always,setup} --json
+  eta-112.py mac <komut> [...]    Ethernet MAC (oku / doğrula)
+       komutlar: read | check <MAC> | --json
   eta-112.py --help               bu yardım""")
 
 
@@ -1538,18 +1691,37 @@ def _bios_menu():
     return 0
 
 
+def _mac_menu():
+    print()
+    print(C.B + "  MAC adresi" + C.R)
+    print(C.DIM + "  1) MAC oku (+ Faz OUI durumu)" + C.R)
+    print(C.DIM + "  2) Bir MAC'i doğrula (Faz'a ait mi?)" + C.R)
+    print(C.DIM + "  0) Geri" + C.R)
+    hr()
+    s = ask("  Seçim: ").strip()
+    if s == "1":
+        return etamac_main(["read"]) or 0
+    if s == "2":
+        m = ask("  Doğrulanacak MAC: ").strip()
+        return etamac_main(["check", m]) or 0
+    return 0
+
+
 def _menu():
     print()
     print(C.B + "  ETA-112 — Birleşik Parola Aracı" + C.R)
     print(C.DIM + "  1) İşletim sistemi kullanıcı parolası (canlı/çalışan disk)" + C.R)
     print(C.DIM + "  2) BIOS parolası (oku / ayarla / temizle)" + C.R)
+    print(C.DIM + "  3) MAC adresi (oku / doğrula)" + C.R)
     print(C.DIM + "  0) Çıkış" + C.R)
     hr()
-    s = ask("  Seçim [1/2/0]: ").strip()
+    s = ask("  Seçim [1/2/3/0]: ").strip()
     if s == "1":
         return kps_main([]) or 0
     if s == "2":
         return _bios_menu()
+    if s == "3":
+        return _mac_menu()
     return 0
 
 
@@ -1561,6 +1733,8 @@ def main():
         return etabios_main(argv[1:]) or 0
     if argv and argv[0] in ("kullanici", "user", "os", "kps"):
         return kps_main(argv[1:]) or 0
+    if argv and argv[0] in ("mac", "ethernet", "eth"):
+        return etamac_main(argv[1:]) or 0
     if argv:
         if argv[0].startswith("-"):     # çıplak bayraklar -> kullanıcı modu (geriye uyum)
             return kps_main(argv) or 0
@@ -1590,7 +1764,7 @@ fi
 # kesinlikle root gerektirir. Python tarafı da ayrıca kontrol eder.
 NEED_ROOT=1
 for a in "$@"; do
-  case "$a" in --list|--liste|--dry-run|--kuru|--help|-h|info|read|--json|calibrate) NEED_ROOT=0 ;; esac
+  case "$a" in --list|--liste|--dry-run|--kuru|--help|-h|info|read|--json|calibrate|mac|check|oku|dogrula|kontrol) NEED_ROOT=0 ;; esac
 done
 if [ "$NEED_ROOT" = "1" ] && [ "$(id -u)" -ne 0 ]; then
   die "root gerekli. Şöyle çalıştırın:  curl -fsSL <URL> | sudo bash"
