@@ -69,10 +69,12 @@ işletim sistemi (ör. Windows) kurulsa bile yeni MAC geçerli olur.
 
 **Desteklenen donanımlar:**
 
-<!-- DESTEKLENEN-DONANIM:START (otomatik üretilir; elle düzenlemeyin) -->
-- **Faz 1 Vestel Intel (Siyah)** — VESTEL 14MB24A / Intel Core i3-2310M, AMI Aptio (BIOS 4.6.5) (60.180 / %11,19 / 2026)
-- **Faz 2 Vestel AMD (Gri)** — VESTEL 14MB37C1 / AMD A10-5750M, AMI Aptio (BIOS L0.30) (53.733 / %9,99 / 2026)
-- **Faz 2 Vestel Intel (Gri)** — VESTEL 14MB57 / Intel Core i3-4000M, AMI Aptio (BIOS 4.6.5) (205.399 / %38,18 / 2026)
+<!-- DESTEKLENEN-DONANIM:START (otomatik üretilir — tablo biçimi; elle düzenlemeyin) -->
+| Faz / Model | Anakart | İşlemci | BIOS | Adet | Oran | Yıl |
+|---|---|---|---|--:|--:|:--:|
+| **Faz 1 Vestel Intel (Siyah)** | VESTEL 14MB24A | Intel Core i3-2310M | AMI Aptio 4.6.5 | 60.180 | %11,19 | 2026 |
+| **Faz 2 Vestel AMD (Gri)** | VESTEL 14MB37C1 | AMD A10-5750M | AMI Aptio L0.30 | 53.733 | %9,99 | 2026 |
+| **Faz 2 Vestel Intel (Gri)** | VESTEL 14MB57 | Intel Core i3-4000M | AMI Aptio 4.6.5 | 205.399 | %38,18 | 2026 |
 <!-- DESTEKLENEN-DONANIM:END -->
 
 ---
