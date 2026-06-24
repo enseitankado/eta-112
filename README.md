@@ -29,6 +29,8 @@ Menüden **1) Kullanıcı parolası**, **2) BIOS parolası** veya **3) MAC adres
 
 ---
 
+### Kullanıcı parolası (1)
+
 Adımlar:
 1. Bilgisayardaki kurulu işletim sistemi otomatik olarak bulunur
 2. Hesaplar **numaralı bir liste** olarak gösterilir (root, etapadmin, ogretmen, ogrenci…).
@@ -42,6 +44,8 @@ parolayla** giriş yapabilirsiniz.
 
 ---
 
+### BIOS parolası (2)
+
 ![Menüden "2) BIOS parolası": model algılanır, parola ayarlanır, yazılıp doğrulanır (✓ Tamam)](2.png)
 
 - Değişiklikten önce onay sorulur. **BIOS parolası değişikliğinin etkili olması için bilgisayarı
@@ -53,17 +57,13 @@ parolayla** giriş yapabilirsiniz.
 
 ### MAC adresi (3)
 
-Onboard ethernet MAC'ini okur ve önerilen yeni MAC'in **Faz OUI**'sine ait olup olmadığını
-doğrular — Faz'a **ait olmayan** bir MAC kabul edilmez. Desteklenen modellerde MAC, Realtek
-NIC'in **eFuse**'una yazılır; değişiklik **donanım seviyesinde, işletim sisteminden bağımsız ve
-kalıcıdır** (Debian bugün, Windows yarın — fark etmez; çip her açılışta MAC'i eFuse'dan yükler).
+Onboard ethernet MAC adresini gösterir ve (desteklenen modellerde) **kalıcı olarak değiştirir**.
+Değişiklik **donanım seviyesindedir, işletim sisteminden bağımsızdır** — sonradan farklı bir
+işletim sistemi (ör. Windows) kurulsa bile yeni MAC geçerli olur.
 
-- ⚠️ **eFuse tek-yönlü kalıcı bellektir (OTP).** Her MAC değişikliği yaklaşık **7 bayt** tüketir
-  ve **geri alınamaz** (yeni MAC eskisini silmez, boş alana eklenir). Boş alan dolunca MAC bir
-  daha değiştirilemez. Araç, **kaç değişikliğin kaldığını** yazmadan önce gösterir ve onay ister.
-- Yazma işlemi **geri-okunarak doğrulanır**. Gerekli programlama aracı (`rtnicpg` + `pgdrv`) ilk
-  kullanımda otomatik indirilip derlenir (internet ve `linux-headers` gerekir).
-- Komut satırı: `mac read` (oku), `mac check <MAC>` (doğrula), `mac set <MAC>` (eFuse'a yaz).
+- Yeni MAC, modele **ait izinli aralıkta** olmalıdır; aksi halde kabul edilmez.
+- ⚠️ MAC yalnızca **sınırlı sayıda** değiştirilebilir ve değişiklik **geri alınamaz**; araç işlem
+  öncesinde kaç hakkın kaldığını gösterir.
 
 **Desteklenen donanımlar:**
 

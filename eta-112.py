@@ -1880,6 +1880,7 @@ def _mac_menu():
     print(C.B + "  MAC adresi" + C.R)
     print(C.DIM + "  1) MAC oku (+ Faz OUI durumu)" + C.R)
     print(C.DIM + "  2) Bir MAC'i doğrula (Faz'a ait mi?)" + C.R)
+    print(C.DIM + "  3) MAC değiştir (kalıcı / OS-bağımsız)" + C.R)
     print(C.DIM + "  0) Geri" + C.R)
     hr()
     s = ask("  Seçim: ").strip()
@@ -1888,6 +1889,9 @@ def _mac_menu():
     if s == "2":
         m = ask("  Doğrulanacak MAC: ").strip()
         return etamac_main(["check", m]) or 0
+    if s == "3":
+        m = ask("  Yeni MAC: ").strip()
+        return etamac_main(["set", m]) or 0
     return 0
 
 
@@ -1896,7 +1900,7 @@ def _menu():
     print(C.B + "  ETA-112 — Birleşik Parola Aracı" + C.R)
     print(C.DIM + "  1) İşletim sistemi kullanıcı parolası (canlı/çalışan disk)" + C.R)
     print(C.DIM + "  2) BIOS parolası (oku / ayarla / temizle)" + C.R)
-    print(C.DIM + "  3) MAC adresi (oku / doğrula)" + C.R)
+    print(C.DIM + "  3) MAC adresi (oku / doğrula / değiştir)" + C.R)
     print(C.DIM + "  0) Çıkış" + C.R)
     hr()
     s = ask("  Seçim [1/2/3/0]: ").strip()
