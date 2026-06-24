@@ -1673,13 +1673,42 @@ def _hx2mac(h):
 
 def _parse_nodeid(out):
     import re
-    m=re.search(r"NODE ID:\s*([0-9A-Fa-f]{2}(?:\s+[0-9A-Fa-f]{2}){5})", out or "")
+    m=re.search(r"NODE\s*ID\s*[:=]\s*([0-9A-Fa-f]{2}(?:\s+[0-9A-Fa-f]{2}){5})", out or "")
     return re.sub(r"\s+","",m.group(1)).upper() if m else None
 
 def _parse_remain(out):
     import re
     m=re.search(r"Remain\s+(\d+)\s+Bytes", out or "")
     return int(m.group(1)) if m else None
+
+def _parse_writecount(out):
+    import re
+    m=re.search(r"Write Count\s*=\s*(\d+)", out or "")
+    return int(m.group(1)) if m else None
+
+def _efuse_dump_bytes(out):
+    """rtnicpg /r /efuse ham hex dokum satirlarini bayt dizisine cevirir."""
+    import re; bs=[]
+    for ln in (out or "").splitlines():
+        s=ln.strip()
+        if s and re.fullmatch(r"(?:[0-9A-Fa-f]{2}\s+)*[0-9A-Fa-f]{2}", s) and len(s.split())>=8:
+            try: bs+=[int(x,16) for x in s.split()]
+            except ValueError: pass
+    return bs
+
+def _parse_efuse_history(out, current_hex):
+    """eFuse'daki MAC-bayt override komutlarini (18 0X VV, X<=5) sirayla parse edip
+    yazilan MAC dizisini (yaklasik) kurar. current_hex: mevcut NODE ID (12 hex)."""
+    bs=_efuse_dump_bytes(out)
+    if not current_hex or len(current_hex)<12: return []
+    cur=[int(current_hex[i:i+2],16) for i in range(0,12,2)]
+    macs=[]; i=0
+    while i+2 < len(bs):
+        if bs[i]==0x18 and bs[i+1]<=0x05:
+            b=list(cur); b[bs[i+1]]=bs[i+2]
+            macs.append(":".join("%02X"%x for x in b)); i+=3
+        else: i+=1
+    return macs
 
 def _nm_eth_cons():
     if not which("nmcli"): return []
@@ -1745,14 +1774,17 @@ def _pg_session(pgdir, pgbin, write_hex=None):
     try:
         if sh("rmmod","r8169").returncode==0: removed=True
         sh("insmod",ko)
-        b=sh(pgbin,"/v","/efuse","/#","1"); bo=(b.stdout or "")+(b.stderr or "")
-        res["nodeid_before"]=_parse_nodeid(bo); res["remain_before"]=_parse_remain(bo)
         if write_hex:
             w=sh(pgbin,"/efuse","/nodeid",write_hex,"/#","1"); wo=(w.stdout or "")+(w.stderr or "")
             res["wrote_ok"]=("Successfully" in wo)
-            a2=sh(pgbin,"/v","/efuse","/#","1"); ao=(a2.stdout or "")+(a2.stderr or "")
-            res["nodeid_after"]=_parse_nodeid(ao); res["remain_after"]=_parse_remain(ao)
-            res["verified"]=(res["nodeid_after"]==write_hex.upper())
+        rd=sh(pgbin,"/r","/efuse","/#","1"); ro=(rd.stdout or "")+(rd.stderr or "")
+        res["rdump"]=ro
+        res["nodeid"]=_parse_nodeid(ro); res["remain"]=_parse_remain(ro)
+        res["writecount"]=_parse_writecount(ro)
+        if not res["nodeid"]:        # /r vermezse /v ile tamamla
+            v=sh(pgbin,"/v","/efuse","/#","1"); vo=(v.stdout or "")+(v.stderr or "")
+            res["nodeid"]=_parse_nodeid(vo); res["remain"]=res["remain"] or _parse_remain(vo)
+        if write_hex: res["verified"]=(res["nodeid"]==write_hex.upper())
         res["ok"]=True
     finally:
         sh("rmmod","pgdrv")
@@ -1777,42 +1809,60 @@ def cmd_mac_set(a):
     if err:
         if _JSON: return emit({"ok":False,"error":err},1)
         print(R("  rtnicpg hazırlanamadı: "+err)); return 1
-    pre=_pg_session(pgdir,pgbin)            # on-okuma: mevcut NODE ID + bos alan
+    pre=_pg_session(pgdir,pgbin)            # on-okuma: mevcut MAC + gecmis + sayaclar
     if not pre.get("ok"):
         if _JSON: return emit({"ok":False,"error":"NIC eFuse okunamadı"},1)
         print(R("  NIC eFuse okunamadı (rtnicpg).")); return 1
-    cur=pre.get("nodeid_before") or ""; remain=pre.get("remain_before")
+    cur=pre.get("nodeid") or ""; remain=pre.get("remain"); wcount=pre.get("writecount")
+    history=_parse_efuse_history(pre.get("rdump") or "", cur)
+    uniq=[]
+    for mc in history:
+        if mc not in uniq: uniq.append(mc)
     maxw=(remain//PG_BYTES_PER_WRITE) if isinstance(remain,int) else None
     if cur==hexmac.upper() and not getattr(a,"yes",False):
-        if _JSON: return emit({"ok":True,"changed":False,"mac":m,"remain_bytes":remain,"max_changes_left":maxw,"note":"zaten bu MAC"})
+        if _JSON: return emit({"ok":True,"changed":False,"mac":m,"remain_bytes":remain,
+                               "max_changes_left":maxw,"write_count":wcount,"history":uniq,"note":"zaten bu MAC"})
         print(Y("  eFuse NODE ID zaten bu değerde; değişiklik yok (yine de yazmak için -y).")); return 0
     if not _JSON:
-        print(f"\n  Mevcut MAC : {Cy(_hx2mac(cur)) if cur else D('(okunamadı)')}")
-        print(f"  Yeni MAC   : {G(m)}  {D('('+(vendor or oui)+')')}")
-        print(f"  {WARN} {Y('eFuse = OTP (tek-yönlü kalıcı bellek). Her MAC değişikliği ~%d bayt tüketir ve GERİ ALINAMAZ.'%PG_BYTES_PER_WRITE)}")
+        print(B("\n  MAC değiştirme — eFuse durumu"))
+        print(f"  Mevcut MAC          : {Cy(_hx2mac(cur)) if cur else D('(okunamadı)')}")
+        if uniq:
+            print(D("  Daha önce yazılan MAC'ler (eskiden yeniye):"))
+            for i,mc in enumerate(uniq,1):
+                tag=D("  (mevcut)") if mc.replace(":","")==cur.upper() else ""
+                print(f"     {D('%d.'%i)} {Cy(mc)}{tag}")
+        else:
+            print(D("  Daha önce yazılmış MAC override kaydı yok (fabrika değerinde)."))
+        if isinstance(wcount,int):
+            print(f"  Toplam eFuse yazma  : {wcount}")
         if isinstance(remain,int):
-            print(f"  {WARN} {R('Boş alan %d bayt → bu MAC dahil EN FAZLA ~%d değişiklik daha yapılabilir.'%(remain,maxw))}")
-            print(D("     Neden: yeni MAC eskisini SİLMEZ; boş alana EKLENİR (OTP silinemez). Alan bitince MAC bir daha değiştirilemez."))
+            print(f"  Kalan yazma hakkı   : ~{maxw}   {D('(boş alan %d bayt; her değişiklik ~%d bayt)'%(remain,PG_BYTES_PER_WRITE))}")
+        print(f"  Yeni MAC            : {G(m)}  {D('('+(vendor or oui)+')')}")
+        print(f"  {WARN} {Y('eFuse = OTP (tek-yönlü kalıcı): yeni MAC eskisini SİLMEZ, boş alana EKLENİR; GERİ ALINAMAZ. Alan bitince MAC bir daha değiştirilemez.')}")
+        if isinstance(maxw,int) and maxw<=1:
+            print(f"  {WARN} {R('DİKKAT: yazma hakkı tükenmek üzere — bu işlemden sonra MAC bir daha değiştirilemeyebilir!')}")
         if not getattr(a,"yes",False):
             try: ans=input(f"\n  Onaylıyorsanız {B('EVET')} yazın: ").strip()
             except EOFError: ans=""
             if ans!="EVET": print(Y("  İptal edildi.")); return 0
         print(f"  {D('eFuse yazılıyor (ağ kısa süre düşebilir)...')}",flush=True)
     res=_pg_session(pgdir,pgbin,write_hex=hexmac)
-    rb=res.get("remain_after"); wleft=(rb//PG_BYTES_PER_WRITE) if isinstance(rb,int) else None
+    rb=res.get("remain"); wleft=(rb//PG_BYTES_PER_WRITE) if isinstance(rb,int) else None
     if _JSON:
         return emit({"ok":bool(res.get("wrote_ok")),"changed":True,"verified":res.get("verified"),
-                     "mac":m,"nodeid_after":res.get("nodeid_after"),
-                     "remain_bytes":rb,"max_changes_left":wleft},
+                     "mac":m,"nodeid":res.get("nodeid"),"write_count":res.get("writecount"),
+                     "remain_bytes":rb,"max_changes_left":wleft,
+                     "history":_parse_efuse_history(res.get("rdump") or "", res.get("nodeid") or "")},
                     0 if (res.get("wrote_ok") and res.get("verified")) else 1)
     if not res.get("wrote_ok"):
         print(f"  {ERR} {R('Yazma başarısız (rtnicpg).')}"); return 1
     if res.get("verified"):
         print(f"  {OK} {G('eFuse yazıldı ve DOĞRULANDI')} — NODE ID: {Cy(m)}")
     else:
-        print(f"  {WARN} {Y('Yazıldı ama geri-oku doğrulaması tutmadı (NODE ID: %s).'%_hx2mac(res.get('nodeid_after') or ''))}")
+        print(f"  {WARN} {Y('Yazıldı ama geri-oku doğrulaması tutmadı (NODE ID: %s).'%_hx2mac(res.get('nodeid') or ''))}")
     if isinstance(rb,int):
-        print(D("  eFuse kalan boş alan: %d bayt (~%d değişiklik daha)."%(rb,wleft)))
+        print(D("  Toplam eFuse yazma: %s   Kalan yazma hakkı: ~%d  (boş alan %d bayt)."
+                %(res.get('writecount') if res.get('writecount') is not None else '?', wleft, rb)))
     print(f"  {Y('Yeni MAC OS-bağımsız ve kalıcıdır.')} Doğrulamak için yeniden başlatıp 'mac read' çalıştırın.")
     return 0
 
