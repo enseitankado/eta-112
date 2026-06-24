@@ -61,6 +61,8 @@ Onboard ethernet MAC adresini gösterir ve (desteklenen modellerde) **kalıcı o
 Değişiklik **donanım seviyesindedir, işletim sisteminden bağımsızdır** — sonradan farklı bir
 işletim sistemi (ör. Windows) kurulsa bile yeni MAC geçerli olur.
 
+![Menüden "3) MAC değiştir": mevcut MAC, daha önce yazılan MAC'ler ve kalan yazma hakkı gösterilir; onaylanınca eFuse'a yazılıp doğrulanır (✓ DOĞRULANDI)](3.png)
+
 - Yeni MAC, modele **ait izinli aralıkta** olmalıdır; aksi halde kabul edilmez.
 - ⚠️ MAC yalnızca **sınırlı sayıda** değiştirilebilir ve değişiklik **geri alınamaz**; araç işlem
   öncesinde kaç hakkın kaldığını gösterir.
