@@ -1452,36 +1452,67 @@ def cmd_clear(a):
     _write_result_print(res); return 0 if res["ok"] else 1
 
 # ===================== CLI =====================
+class _BiosHelp(argparse.RawDescriptionHelpFormatter):
+    """Yardım: komut kolonunu genişletir (calibrate alt satıra kaymaz);
+    açıklama/epilog ham (renkli) kalır."""
+    def __init__(self, prog):
+        super().__init__(prog, max_help_position=30)
+    def add_argument(self, action):
+        super().add_argument(action)
+        # argparse alt komutlari (info/read/calibrate...) kolon uzunluguna katmaz ->
+        # 'calibrate' yardimi alt satira kayar. Bunlari da hesaba kat.
+        try:
+            for sub in self._iter_indented_subactions(action):
+                inv=self._format_action_invocation(sub)
+                self._action_max_length=max(self._action_max_length, len(inv)+self._current_indent)
+        except Exception:
+            pass
+
 def build_parser():
     prog="eta-112.py bios"
-    desc=(B(Cy("etabios"))+" — AMI Aptio "+B("BIOS parola aracı")+" (oku / ayarla / temizle)\n"
-          +D("Profil-tabanlı: yalnız önceden tanımlı modeller. UEFI'de efivarfs, Legacy'de flashrom.")+"\n"
-          +Y("UYARI: ")+"ayarla/temizle flash'ı "+R("DOĞRUDAN")+" yazar (onay yok); "+R("brick riski")+".")
-    ex=[B("ÖRNEKLER:"),
-        D("  # Parolaları oku (parametresiz çağrı da okur):"),
-        "  sudo "+prog+"            "+D("# = read"),
-        "  sudo "+prog+" "+G("read"),
-        D("  # Parola ayarla (Yönetici ve Kullanıcı sırayla sorulur):"),
-        "  sudo "+prog+" "+G("set"),
-        D("  # Parola temizle:"),
-        "  sudo "+prog+" "+G("clear")+" all",
-        D("  # Model/destek bilgisi:"),
-        "  sudo "+prog+" "+G("info"),
-        D("  # Yeni BIOS sürümü için keystream doğrula (önce BIOS'tan bilinen parola gir):"),
-        "  sudo "+prog+" "+G("calibrate")+" yonetici 1234",
-        "", D("  # GUI/makine için JSON çıktı ve parametreli ayarlama:"),
-        "  sudo "+prog+" "+G("read")+" "+Cy("--json"),
-        "  sudo "+prog+" "+G("set")+" "+Cy("--yonetici ORNEK99 --kullanici ABC123 --json"),
-        "  sudo "+prog+" "+G("set")+" "+Cy("--yonetici ORNEK99 --koruma always --json")+D("  # her açılışta sorsun"),
-        "  sudo "+prog+" "+G("set")+" "+Cy("--koruma setup --json")+D("  # yalnız koruma modunu değiştir (parola dokunma)"),
-        "", B("DESTEKLENEN MODELLER:")]
-    ex+=["  "+OK+f" {Cy(b)} / BIOS {Cy(v)}  {D('— '+PROFILES[(b,v)]['label'])}" for (b,v) in PROFILES]
-    ex+=["", B("Programcı: ")+Cy("Özgür Koca")+D(" — ")+Cy("ozgurkoca.com"),
-         B("Lisans: ")+G("GPL")+D(" — tamamen özgür yazılım.")]
+    rule=D("─"*60)
+    desc=("\n"+B(Cy("  etabios"))+" — AMI Aptio "+B("BIOS parola aracı")+"   "+D("oku · ayarla · temizle")+"\n"
+          +D("  Profil tabanlı; yalnız tanımlı modeller.  UEFI → efivarfs,  Legacy → flashrom.")+"\n\n"
+          +"  "+WARN+"  "+Y("set/clear flash'a DOĞRUDAN yazar (onaysız) — ")+R("brick riski")+".")
+    pre="sudo "+prog+" "
+    def E(args_plain, args_colored, note=None):
+        """Hizalı örnek satırı: önek soluk, komut renkli, açıklama sağda."""
+        s="    "+D(pre)+args_colored
+        if note is not None:
+            vis=len("    "+pre+args_plain)
+            s+=" "*max(2, 56-vis)+D("→ "+note)
+        return s
+    ex=["", rule, B("ÖRNEKLER"),
+        Cy("  Okuma"),
+        E("", "", "parametresiz çağrı da okur (= read)"),
+        E("read", G("read"), "yönetici + kullanıcı parolasını göster"),
+        "",
+        Cy("  Ayarla / temizle")+"  "+R("(flash'a yazar)"),
+        E("set", G("set"), "iki parola sırayla sorulur"),
+        E("clear all", G("clear")+" "+Cy("all"), "tüm parolaları temizle"),
+        "",
+        Cy("  Bilgi / gelişmiş"),
+        E("info", G("info"), "model ve destek durumu"),
+        E("calibrate yonetici 1234", G("calibrate")+" "+Cy("yonetici 1234"), "keystream doğrula"),
+        "",
+        Cy("  GUI / makine (JSON çıktı)"),
+        E("read --json", G("read")+" "+Cy("--json")),
+        E("set --yonetici ORNEK99 --kullanici ABC123 --json",
+          G("set")+" "+Cy("--yonetici ORNEK99 --kullanici ABC123 --json")),
+        E("set --yonetici ORNEK99 --koruma always --json",
+          G("set")+" "+Cy("--yonetici ORNEK99 --koruma always --json"), "her açılışta sor"),
+        E("set --koruma setup --json",
+          G("set")+" "+Cy("--koruma setup --json"), "yalnız koruma modunu değiştir"),
+        "", rule, B("DESTEKLENEN MODELLER")]
+    ex+=["  "+OK+"  "+Cy(b.ljust(9))+D("/")+" BIOS "+Cy(v.ljust(6))+"  "+D(PROFILES[(b,v)]['label'])
+         for (b,v) in PROFILES]
+    ex+=["", rule,
+         "  "+D("Geliştirici ")+Cy("Özgür Koca")+D(" · ")+Cy("ozgurkoca.com")
+         +D("      Lisans ")+G("GPL")+D(" — özgür yazılım")]
     common=argparse.ArgumentParser(add_help=False)
     common.add_argument("--json", action="store_true", help="makine-okur JSON çıktı (GUI için)")
     p=argparse.ArgumentParser(prog=prog, description=desc, epilog="\n".join(ex), parents=[common],
-                              formatter_class=argparse.RawDescriptionHelpFormatter)
+                              formatter_class=_BiosHelp)
     sub=p.add_subparsers(dest="cmd", metavar="KOMUT")
     sub.add_parser("info", help="model/destek bilgisi", parents=[common])
     pr=sub.add_parser("read", help="parolaları oku (varsayılan komut)", parents=[common])
@@ -1622,16 +1653,182 @@ def cmd_mac_check(a):
     print(f"     {Y('neden: '+reason)}")
     return 1
 
+# ----- MAC YAZMA: Realtek eFuse (rtnicpg) -----
+# MAC, RTL8168F'in dahili eFuse'unda (OTP) tutulur; OS-bagimsiz/kalici degisiklik
+# yalniz Realtek'in PG araci (rtnicpg) ile eFuse'a yazilarak yapilir. Arac+modul
+# otomatik indirilip derlenir. eFuse OTP: her yazim ~7 bayt tuketir, GERI ALINAMAZ.
+PG_REPO = "https://github.com/redchenjs/rtnicpg.git"
+PG_DIR  = "/var/tmp/eta-112-rtnicpg"
+PG_BYTES_PER_WRITE = 7   # bir NODEID override'inin tukettigi yaklasik eFuse bayti
+
+def _pg_binname():
+    m = os.uname().machine
+    return {"x86_64":"rtnicpg-x86_64","i686":"rtnicpg-i686","i386":"rtnicpg-i686",
+            "aarch64":"rtnicpg-aarch64-linux-gnu","armv7l":"rtnicpg-armv8",
+            "armv8l":"rtnicpg-armv8"}.get(m, "rtnicpg-x86_64")
+
+def _hx2mac(h):
+    h=(h or "").replace(":","").upper()
+    return ":".join(h[i:i+2] for i in range(0,12,2)) if len(h)>=12 else (h or "")
+
+def _parse_nodeid(out):
+    import re
+    m=re.search(r"NODE ID:\s*([0-9A-Fa-f]{2}(?:\s+[0-9A-Fa-f]{2}){5})", out or "")
+    return re.sub(r"\s+","",m.group(1)).upper() if m else None
+
+def _parse_remain(out):
+    import re
+    m=re.search(r"Remain\s+(\d+)\s+Bytes", out or "")
+    return int(m.group(1)) if m else None
+
+def _nm_eth_cons():
+    if not which("nmcli"): return []
+    r=subprocess.run(["nmcli","-t","-f","NAME,TYPE","connection","show"],capture_output=True,text=True)
+    out=[]
+    for ln in (r.stdout or "").splitlines():
+        p=ln.rsplit(":",1)
+        if len(p)==2 and "ethernet" in p[1]: out.append(p[0])
+    return out
+
+def ensure_rtnicpg():
+    """rtnicpg ikilisi + pgdrv.ko hazirla (indir/derle). Doner (pgdir, binpath, err)."""
+    binname=_pg_binname(); bpath=os.path.join(PG_DIR,binname); ko=os.path.join(PG_DIR,"pgdrv.ko")
+    if os.path.exists(bpath) and os.path.exists(ko):
+        try: os.chmod(bpath,0o755)
+        except OSError: pass
+        return PG_DIR,bpath,None
+    if os.geteuid()!=0: return None,None,"sudo gerekli"
+    rel=os.uname().release; hdr="/lib/modules/%s/build"%rel
+    need=[t for t in ("git","gcc","make") if not which(t)]
+    if not os.path.isdir(hdr): need.append("linux-headers-"+rel)
+    if need:
+        if not _JSON: print(f"  {D('Derleme bağımlılıkları kuruluyor: '+', '.join(need))}",flush=True)
+        subprocess.run(["apt-get","install","-y"]+need,capture_output=True)
+        if any(not which(t) for t in ("git","gcc","make")) or not os.path.isdir(hdr):
+            return None,None,"derleme araçları/başlıkları kurulamadı (git build-essential linux-headers-%s)"%rel
+    if not os.path.isdir(os.path.join(PG_DIR,".git")):
+        if not _JSON: print(f"  {D('rtnicpg indiriliyor...')}",flush=True)
+        r=subprocess.run(["git","clone","--depth","1",PG_REPO,PG_DIR],capture_output=True,text=True)
+        if not os.path.isdir(os.path.join(PG_DIR,".git")):
+            return None,None,"rtnicpg indirilemedi: "+((r.stderr or "")[-160:])
+    if not os.path.exists(bpath):
+        return None,None,"bu mimari için rtnicpg ikilisi yok: "+binname
+    # pgdrv.c: kernel>=6.3 vm_flags salt-okunur -> vm_flags_set
+    pgc=os.path.join(PG_DIR,"pgdrv.c")
+    try:
+        s=open(pgc).read()
+        if "vma->vm_flags |= VM_IO;" in s:
+            open(pgc,"w").write(s.replace("vma->vm_flags |= VM_IO;","vm_flags_set(vma, VM_IO);"))
+    except OSError: pass
+    if not _JSON: print(f"  {D('pgdrv.ko derleniyor...')}",flush=True)
+    subprocess.run(["make","clean"],cwd=PG_DIR,capture_output=True)
+    r=subprocess.run(["make"],cwd=PG_DIR,capture_output=True,text=True)
+    if not os.path.exists(ko):
+        return None,None,"pgdrv.ko derlenemedi: "+((r.stderr or "")[-240:])
+    try: os.chmod(bpath,0o755)
+    except OSError: pass
+    return PG_DIR,bpath,None
+
+def _pg_session(pgdir, pgbin, write_hex=None):
+    """Atomik rtnicpg oturumu (AG-GUVENLI): r8169 unbind -> pgdrv -> oku[/yaz] ->
+    pgdrv kaldir -> r8169 geri yukle -> ag geri gelene kadar bekle. Hep geri yukler."""
+    ko=os.path.join(pgdir,"pgdrv.ko")
+    def sh(*a, t=60):
+        try: return subprocess.run(list(a),capture_output=True,text=True,cwd=pgdir,timeout=t)
+        except Exception:
+            class _R: returncode=124; stdout=""; stderr="timeout"
+            return _R()
+    if write_hex:
+        for con in _nm_eth_cons():   # MAC degisince NM baglanabilsin
+            sh("nmcli","connection","modify",con,"802-3-ethernet.mac-address","")
+    res={"ok":False}; removed=False
+    try:
+        if sh("rmmod","r8169").returncode==0: removed=True
+        sh("insmod",ko)
+        b=sh(pgbin,"/v","/efuse","/#","1"); bo=(b.stdout or "")+(b.stderr or "")
+        res["nodeid_before"]=_parse_nodeid(bo); res["remain_before"]=_parse_remain(bo)
+        if write_hex:
+            w=sh(pgbin,"/efuse","/nodeid",write_hex,"/#","1"); wo=(w.stdout or "")+(w.stderr or "")
+            res["wrote_ok"]=("Successfully" in wo)
+            a2=sh(pgbin,"/v","/efuse","/#","1"); ao=(a2.stdout or "")+(a2.stderr or "")
+            res["nodeid_after"]=_parse_nodeid(ao); res["remain_after"]=_parse_remain(ao)
+            res["verified"]=(res["nodeid_after"]==write_hex.upper())
+        res["ok"]=True
+    finally:
+        sh("rmmod","pgdrv")
+        if removed: subprocess.run(["modprobe","r8169"],capture_output=True)
+        for _ in range(30):   # ag geri gelene kadar bekle (max 30sn)
+            if subprocess.run(["ip","route","get","8.8.8.8"],capture_output=True).returncode==0: break
+            time.sleep(1)
+    return res
+
+def cmd_mac_set(a):
+    if os.geteuid()!=0:
+        return emit({"ok":False,"error":"sudo gerekli"},1) if _JSON else (print(R("  Bunun için 'sudo' gerekli.")) or 1)
+    prof,d=_mac_profile()
+    if not prof:
+        return emit({"ok":False,"error":"desteklenmeyen model"},1) if _JSON else (print(R("  Desteklenmeyen model.")) or 1)
+    ok,m,oui,vendor,reason=validate_mac(a.mac, prof)
+    if not ok:
+        if _JSON: return emit({"ok":False,"error":reason,"mac":m},1)
+        print(f"  {ERR} {R('Geçersiz MAC')}: {Y(reason)}"); return 1
+    hexmac=m.replace(":","")
+    pgdir,pgbin,err=ensure_rtnicpg()
+    if err:
+        if _JSON: return emit({"ok":False,"error":err},1)
+        print(R("  rtnicpg hazırlanamadı: "+err)); return 1
+    pre=_pg_session(pgdir,pgbin)            # on-okuma: mevcut NODE ID + bos alan
+    if not pre.get("ok"):
+        if _JSON: return emit({"ok":False,"error":"NIC eFuse okunamadı"},1)
+        print(R("  NIC eFuse okunamadı (rtnicpg).")); return 1
+    cur=pre.get("nodeid_before") or ""; remain=pre.get("remain_before")
+    maxw=(remain//PG_BYTES_PER_WRITE) if isinstance(remain,int) else None
+    if cur==hexmac.upper() and not getattr(a,"yes",False):
+        if _JSON: return emit({"ok":True,"changed":False,"mac":m,"remain_bytes":remain,"max_changes_left":maxw,"note":"zaten bu MAC"})
+        print(Y("  eFuse NODE ID zaten bu değerde; değişiklik yok (yine de yazmak için -y).")); return 0
+    if not _JSON:
+        print(f"\n  Mevcut MAC : {Cy(_hx2mac(cur)) if cur else D('(okunamadı)')}")
+        print(f"  Yeni MAC   : {G(m)}  {D('('+(vendor or oui)+')')}")
+        print(f"  {WARN} {Y('eFuse = OTP (tek-yönlü kalıcı bellek). Her MAC değişikliği ~%d bayt tüketir ve GERİ ALINAMAZ.'%PG_BYTES_PER_WRITE)}")
+        if isinstance(remain,int):
+            print(f"  {WARN} {R('Boş alan %d bayt → bu MAC dahil EN FAZLA ~%d değişiklik daha yapılabilir.'%(remain,maxw))}")
+            print(D("     Neden: yeni MAC eskisini SİLMEZ; boş alana EKLENİR (OTP silinemez). Alan bitince MAC bir daha değiştirilemez."))
+        if not getattr(a,"yes",False):
+            try: ans=input(f"\n  Onaylıyorsanız {B('EVET')} yazın: ").strip()
+            except EOFError: ans=""
+            if ans!="EVET": print(Y("  İptal edildi.")); return 0
+        print(f"  {D('eFuse yazılıyor (ağ kısa süre düşebilir)...')}",flush=True)
+    res=_pg_session(pgdir,pgbin,write_hex=hexmac)
+    rb=res.get("remain_after"); wleft=(rb//PG_BYTES_PER_WRITE) if isinstance(rb,int) else None
+    if _JSON:
+        return emit({"ok":bool(res.get("wrote_ok")),"changed":True,"verified":res.get("verified"),
+                     "mac":m,"nodeid_after":res.get("nodeid_after"),
+                     "remain_bytes":rb,"max_changes_left":wleft},
+                    0 if (res.get("wrote_ok") and res.get("verified")) else 1)
+    if not res.get("wrote_ok"):
+        print(f"  {ERR} {R('Yazma başarısız (rtnicpg).')}"); return 1
+    if res.get("verified"):
+        print(f"  {OK} {G('eFuse yazıldı ve DOĞRULANDI')} — NODE ID: {Cy(m)}")
+    else:
+        print(f"  {WARN} {Y('Yazıldı ama geri-oku doğrulaması tutmadı (NODE ID: %s).'%_hx2mac(res.get('nodeid_after') or ''))}")
+    if isinstance(rb,int):
+        print(D("  eFuse kalan boş alan: %d bayt (~%d değişiklik daha)."%(rb,wleft)))
+    print(f"  {Y('Yeni MAC OS-bağımsız ve kalıcıdır.')} Doğrulamak için yeniden başlatıp 'mac read' çalıştırın.")
+    return 0
+
 def etamac_main(argv):
     global _JSON
     args=list(argv)
     if "--json" in args: _JSON=True; args=[x for x in args if x!="--json"]
     if args and args[0] in ("-h","--help","yardim"):
-        print(B("eta-112.py mac")+" — onboard ethernet MAC oku / doğrula")
+        print(B("eta-112.py mac")+" — onboard ethernet MAC oku / doğrula / yaz")
         print("  eta-112.py mac read            # MAC(ler) + Faz OUI durumu (varsayılan)")
         print("  eta-112.py mac check <MAC>     # önerilen MAC Faz'a ait mi? (biçim+OUI)")
+        print("  eta-112.py mac set <MAC> [-y]  # MAC'i Realtek eFuse'a YAZ (kalıcı, OS-bağımsız)")
         print("  eta-112.py mac [--json]        # makine-okur çıktı")
-        print(D("  Not: 'set' (flash-yazma) bu NIC'te ETKİSİZ — MAC Realtek eFuse'unda; devre dışı."))
+        print(D("  set: Faz OUI zorunlu; yazma geri-oku ile DOĞRULANIR; rtnicpg+pgdrv otomatik"))
+        print(D("       indirilip derlenir. eFuse = OTP (tek-yönlü kalıcı): her değişiklik ~7 bayt"))
+        print(D("       tüketir, GERİ ALINAMAZ; araç kaç değişiklik kaldığını gösterir. -y onaysız."))
         return 0
     cmd=args[0] if args else "read"
     class _A: pass
@@ -1642,29 +1839,43 @@ def etamac_main(argv):
             if _JSON: return emit({"ok":False,"error":"mac argümanı gerekli"},1)
             print(R("  Kullanım: mac check <MAC>")); return 1
         a=_A(); a.mac=args[1]; return cmd_mac_check(a) or 0
-    if cmd in ("set","write","yaz","clear","temizle"):
-        msg=("MAC flash-yazma bu donanımda ETKİSİZ (2026-06-24 canlı test): MAC, BIOS SPI "
-             "flash NVRAM'inde (0x3daee7) yalnız PASİF bir kopyadır; Realtek RTL8168 gerçek "
-             "MAC'ini kendi eFuse/EEPROM'undan okur — flash'ı değiştirmek reboot sonrası MAC'i "
-             "DEĞİŞTİRMEDİ. Kalıcı donanım değişikliği NIC eFuse programlama gerektirir (ayrı/riskli)")
-        if _JSON: return emit({"ok":False,"error":"flash_write_ineffective","detail":msg},1)
-        print(f"  {WARN} {Y(msg)}."); return 1
-    die("Bilinmeyen mac komutu: %s   (read|check)" % cmd)
+    if cmd in ("set","write","yaz"):
+        if len(args)<2:
+            if _JSON: return emit({"ok":False,"error":"mac argümanı gerekli"},1)
+            print(R("  Kullanım: mac set <MAC> [-y]")); return 1
+        a=_A(); a.mac=args[1]; a.yes=("--yes" in args or "-y" in args)
+        return cmd_mac_set(a) or 0
+    die("Bilinmeyen mac komutu: %s   (read|check|set)" % cmd)
 
 
 # ===================== BİRLEŞİK DAĞITICI =====================
 def _unified_usage():
-    print(C.B + "ETA-112 — Birleşik Parola Aracı" + C.R)
-    print("""Kullanım:
-  eta-112.py                      menü (kullanıcı / BIOS)
-  eta-112.py kullanici [...]      İşletim sistemi kullanıcı parolası
-       seçenekler: --list, --dry-run, --help
-  eta-112.py bios <komut> [...]   BIOS parolası (etabios)
-       komutlar: read | set | clear <slot> | info | calibrate | --json
-       set seçenekleri: --yonetici --kullanici --koruma {always,setup} --json
-  eta-112.py mac <komut> [...]    Ethernet MAC (oku / doğrula)
-       komutlar: read | check <MAC> | --json
-  eta-112.py --help               bu yardım""")
+    rule=D("─"*60)
+    PRE="eta-112.py "
+    def row(rest_plain, rest_colored, desc=None):
+        s="  "+D(PRE)+rest_colored
+        if desc is not None:
+            vis=len("  "+PRE+rest_plain)
+            s+=" "*max(2, 40-vis)+D("→ "+desc)
+        return s
+    sub=lambda s: print("        "+D(s))   # komut altı seçenek/alt-komut satırı
+    print()
+    print("  "+B(Cy("ETA-112"))+" — "+B("Birleşik Parola Aracı")+"   "+D("OS · BIOS · MAC"))
+    print()
+    print(rule)
+    print(B("  KULLANIM"))
+    print(row("", "", "etkileşimli menü (kullanıcı / BIOS / MAC)"))
+    print()
+    print(Cy("  Komutlar")+"   "+D("ayrıntılı yardım: ")+G("eta-112.py <komut> -h"))
+    print(row("kullanici [...]", G("kullanici")+" "+D("[...]"), "OS kullanıcı parolasını sıfırla"))
+    sub("--list · --dry-run · --help")
+    print(row("bios <komut>", G("bios")+" "+D("<komut>"), "BIOS yönetici / kullanıcı parolası"))
+    sub("read · set · clear <slot> · info · calibrate · --json")
+    print(row("mac <komut>", G("mac")+" "+D("<komut>"), "Ethernet MAC adresi oku / doğrula"))
+    sub("read · check <MAC> · --json")
+    print()
+    print(row("--help", Cy("--help"), "bu yardım"))
+    print(rule)
 
 
 def _bios_menu():
@@ -1801,6 +2012,15 @@ ensure_pkg cryptsetup cryptsetup 0
 ensure_pkg vgchange   lvm2       0
 ensure_pkg flashrom   flashrom   0
 ensure_pkg dmidecode  dmidecode  0
+# MAC yazma (Realtek eFuse / rtnicpg) için derleme araçları + kernel başlıkları
+ensure_pkg git    git             0
+ensure_pkg gcc    build-essential 0
+ensure_pkg make   build-essential 0
+if [ ! -d "/lib/modules/$(uname -r)/build" ] && [ -n "$APT" ]; then
+  log "Kernel başlıkları kuruluyor (pgdrv.ko için)..."
+  DEBIAN_FRONTEND=noninteractive $APT install -y "linux-headers-$(uname -r)" >/dev/null 2>&1 \
+    || wrn "linux-headers-$(uname -r) kurulamadı (MAC eFuse yazma için gerekli)."
+fi
 
 # --- Aracı çalıştır -------------------------------------------------------
 write_tool
