@@ -66,7 +66,7 @@ işletim sistemi (ör. Windows) kurulsa bile yeni MAC geçerli olur.
 ![Menüden "3) MAC değiştir": mevcut MAC, daha önce yazılan MAC'ler ve kalan yazma hakkı gösterilir; onaylanınca eFuse'a yazılıp doğrulanır (✓ DOĞRULANDI)](3.png)
 
 - Yeni MAC, modele **ait izinli aralıkta** olmalıdır; aksi halde kabul edilmez.
-- ⚠️ MAC yalnızca **sınırlı sayıda** değiştirilebilir ve değişiklik **geri alınamaz**; araç işlem
+- MAC yalnızca **sınırlı sayıda** değiştirilebilir ve değişiklik **geri alınamaz**; araç işlem
   öncesinde kaç hakkın kaldığını gösterir.
 
 ---
@@ -80,17 +80,17 @@ etkinleşir; değişiklik **firmware seviyesindedir**, işletim sisteminden bağ
 - Anahtar biçimi: `XXXXX-XXXXX-XXXXX-XXXXX-XXXXX`.
 - Değiştirme, flash'taki MSDM tablosunu (ACPI sağlama toplamı dahil) günceller; **etkili olması
   için yeniden başlatma** gerekir ve yazma **geri-okunarak doğrulanır**.
-- ⚠️ Yalnızca **MSDM içeren cihazlarda** (Windows 8/10/11 dönemi) çalışır. Windows 7 dönemi
+- Yalnızca **MSDM içeren cihazlarda** (Windows 8/10/11 dönemi) çalışır. Windows 7 dönemi
   cihazlarda **SLIC** bulunur; bu okunabilir bir anahtar içermez.
 
-**Desteklenen donanımlar:**
+**Desteklenen donanımlar (2026):**
 
 <!-- DESTEKLENEN-DONANIM:START (otomatik üretilir — tablo biçimi; elle düzenlemeyin) -->
-| Faz / Model | Anakart | İşlemci | BIOS | Adet | Oran | Yıl |
-|---|---|---|---|--:|--:|:--:|
-| **Faz 1 Vestel Intel (Siyah)** | VESTEL 14MB24A | Intel Core i3-2310M | AMI Aptio 4.6.5 | 60.180 | %11,19 | 2026 |
-| **Faz 2 Vestel AMD (Gri)** | VESTEL 14MB37C1 | AMD A10-5750M | AMI Aptio L0.30 | 53.733 | %9,99 | 2026 |
-| **Faz 2 Vestel Intel (Gri)** | VESTEL 14MB57 | Intel Core i3-4000M | AMI Aptio 4.6.5 | 205.399 | %38,18 | 2026 |
+| Faz / Model | Anakart | İşlemci | BIOS | Adet | Oran |
+|---|---|---|---|--:|--:|
+| **Faz 1 Vestel Intel (Siyah)** | VESTEL 14MB24A | Intel Core i3-2310M | AMI Aptio 4.6.5 | 60.180 | %11,19 |
+| **Faz 2 Vestel AMD (Gri)** | VESTEL 14MB37C1 | AMD A10-5750M | AMI Aptio L0.30 | 53.733 | %9,99 |
+| **Faz 2 Vestel Intel (Gri)** | VESTEL 14MB57 | Intel Core i3-4000M | AMI Aptio 4.6.5 | 205.399 | %38,18 |
 <!-- DESTEKLENEN-DONANIM:END -->
 
 ---
