@@ -1898,6 +1898,143 @@ def etamac_main(argv):
     die("Bilinmeyen mac komutu: %s   (read|check|set)" % cmd)
 
 
+# ===================== BÖLÜM 4: WINDOWS ÜRÜN ANAHTARI (MSDM) =====================
+# OEM Windows ürün anahtarı BIOS firmware'inde ACPI MSDM tablosunda saklanir (Win8+).
+# OS bunu /sys/firmware/acpi/tables/MSDM'de gosterir. Degistirmek icin flash'taki MSDM
+# tablosu duzenlenir + ACPI checksum guncellenir (BIOS parolasiyla ayni flashrom yolu).
+# Not: Win7/Vista cihazlarda MSDM degil SLIC bulunur ve SLIC okunabilir anahtar icermez.
+_MSDM_SYS = "/sys/firmware/acpi/tables/MSDM"
+_WKEY_RE  = r"[A-Z0-9]{5}(?:-[A-Z0-9]{5}){4}"
+
+def validate_wkey(s):
+    import re
+    k=(s or "").strip().upper()
+    if not re.fullmatch(_WKEY_RE, k):
+        return False, None, "biçim XXXXX-XXXXX-XXXXX-XXXXX-XXXXX olmalı (5×5, A-Z 0-9)"
+    return True, k, None
+
+def _read_msdm_sys():
+    if not os.path.exists(_MSDM_SYS): return None
+    try: return open(_MSDM_SYS,"rb").read()
+    except OSError: return "DENIED"
+
+def _msdm_find_key(tbl):
+    """MSDM tablo baytlarinda 29-karakter anahtari bulur. Doner (key, offset) | (None,None)."""
+    import re
+    m=re.search(_WKEY_RE.encode(), tbl or b"")
+    return (m.group().decode(), m.start()) if m else (None, None)
+
+def _acpi_checksum_fix(tbl):
+    """ACPI tablo checksum baytini (offset 9) yeniden hesaplar -> sum%256==0."""
+    b=bytearray(tbl); b[9]=0; b[9]=(256-(sum(b)%256))%256; return bytes(b)
+
+def cmd_wkey_read(a):
+    raw=_read_msdm_sys()
+    slic=os.path.exists("/sys/firmware/acpi/tables/SLIC")
+    if raw is None:
+        if _JSON: return emit({"ok":True,"present":False,"slic":slic,"key":None})
+        print(Y("  MSDM tablosu yok — bu makinede okunabilir Windows ürün anahtarı saklanmıyor."))
+        if slic: print(D("  (SLIC var: Windows 7/Vista OEM aktivasyonu — okunabilir anahtar içermez.)"))
+        return 1
+    if raw=="DENIED":
+        if _JSON: return emit({"ok":False,"error":"sudo gerekli"},1)
+        print(R("  MSDM okunamadı — 'sudo' gerekli.")); return 1
+    key,_=_msdm_find_key(raw)
+    if _JSON: return emit({"ok":bool(key),"present":True,"key":key})
+    if key: print(f"  {OK} {G('Windows ürün anahtarı (MSDM)')}: {Cy(key)}")
+    else:   print(Y("  MSDM tablosu var ama anahtar çözülemedi.")); return 1
+    return 0
+
+def cmd_wkey_set(a):
+    import struct as _st, tempfile
+    if os.geteuid()!=0:
+        return emit({"ok":False,"error":"sudo gerekli"},1) if _JSON else (print(R("  Bunun için 'sudo' gerekli.")) or 1)
+    prof,d=need_profile()
+    if not prof:
+        return emit({"ok":False,"error":"desteklenmeyen model"},1) if _JSON else (print(R("  Desteklenmeyen model (flash erişimi için profil gerekli).")) or 1)
+    ok,newkey,reason=validate_wkey(a.key)
+    if not ok:
+        if _JSON: return emit({"ok":False,"error":reason},1)
+        print(f"  {ERR} {R('Geçersiz anahtar')}: {Y(reason)}"); return 1
+    ifd=(prof.get("flash_mode")=="ifd")
+    if not _JSON: print(f"  {D('Flash okunuyor...')}",flush=True)
+    data,err=flashrom_read(prof.get("chip"), show=False, ifd=ifd)
+    if data is None:
+        if _JSON: return emit({"ok":False,"error":"flash okunamadı"},1)
+        print(R("  Flash okunamadı.")); return 1
+    i=data.find(b"MSDM")
+    if i==-1:
+        msg="MSDM flash'ta bulunamadı (bu cihazda Windows anahtarı yok ya da sıkıştırılmış)"
+        return emit({"ok":False,"error":"no_msdm"},1) if _JSON else (print(Y("  "+msg+".")) or 1)
+    length=_st.unpack("<I",bytes(data[i+4:i+8]))[0]
+    if not (36<length<0x2000) or i+length>len(data):
+        return emit({"ok":False,"error":"MSDM uzunluğu geçersiz"},1) if _JSON else (print(R("  Flash'taki MSDM tablosu geçersiz.")) or 1)
+    tbl=bytes(data[i:i+length]); fk,koff=_msdm_find_key(tbl)
+    if not fk or len(fk)!=len(newkey):
+        return emit({"ok":False,"error":"flash MSDM'de anahtar bulunamadı"},1) if _JSON else (print(R("  Flash MSDM'de anahtar bulunamadı.")) or 1)
+    if fk==newkey:
+        return emit({"ok":True,"changed":False,"key":newkey,"note":"zaten bu anahtar"}) if _JSON else (print(Y("  Anahtar zaten bu değerde.")) or 0)
+    nt=bytearray(tbl); nt[koff:koff+len(newkey)]=newkey.encode("ascii")
+    nt=_acpi_checksum_fix(bytes(nt))
+    new=bytearray(data); new[i:i+length]=nt
+    if not _JSON and not getattr(a,"yes",False):
+        print(f"\n  Mevcut anahtar : {Cy(fk)}")
+        print(f"  Yeni anahtar   : {G(newkey)}")
+        print(f"  {WARN} {Y('BIOS flash MSDM tablosu değiştirilir (ACPI checksum güncellenir). Brick riski; etki için yeniden başlatma gerekir.')}")
+        try: ans=input(f"  Onaylıyorsanız {B('EVET')} yazın: ").strip()
+        except EOFError: ans=""
+        if ans!="EVET": print(Y("  İptal edildi.")); return 0
+        print(f"  {D('Yazılıyor...')}",flush=True)
+    img=tempfile.NamedTemporaryFile(prefix="etawkey_",suffix=".bin",delete=False).name
+    open(img,"wb").write(bytes(new))
+    try:
+        wok,_=flashrom_write(prof.get("chip"), img, show=False, ifd=ifd)
+    finally:
+        try: os.remove(img)
+        except OSError: pass
+    verified=False
+    if wok:
+        rb,_=flashrom_read(prof.get("chip"), show=False, ifd=ifd)
+        if rb:
+            j=rb.find(b"MSDM")
+            if j!=-1:
+                l2=_st.unpack("<I",bytes(rb[j+4:j+8]))[0]; t2=bytes(rb[j:j+l2])
+                k2,_=_msdm_find_key(t2)
+                verified=(k2==newkey) and (sum(t2)%256==0)
+    if _JSON:
+        return emit({"ok":bool(wok),"changed":True,"verified":verified,"key":newkey,"old":fk},
+                    0 if (wok and verified) else 1)
+    if not wok: print(f"  {ERR} {R('Yazma başarısız (flashrom).')}"); return 1
+    if verified: print(f"  {OK} {G('MSDM yazıldı ve DOĞRULANDI')} — anahtar: {Cy(newkey)}")
+    else:        print(f"  {WARN} {Y('Yazıldı ama geri-oku doğrulaması tutmadı.')}")
+    print(f"  {Y('Yeniden başlatın')} — Windows yeni anahtarı MSDM'den okur. 'wkey read' ile doğrulayın.")
+    return 0
+
+def etawkey_main(argv):
+    global _JSON
+    args=list(argv)
+    if "--json" in args: _JSON=True; args=[x for x in args if x!="--json"]
+    if args and args[0] in ("-h","--help","yardim"):
+        print(B("eta-112.py wkey")+" — BIOS'taki Windows ürün anahtarı (ACPI MSDM) oku / değiştir")
+        print("  eta-112.py wkey read           # MSDM'deki Windows ürün anahtarını göster")
+        print("  eta-112.py wkey set <ANAHTAR>  # flash'taki MSDM anahtarını değiştir (checksum'la)")
+        print("  eta-112.py wkey [--json]       # makine-okur çıktı")
+        print(D("  Anahtar biçimi: XXXXX-XXXXX-XXXXX-XXXXX-XXXXX. set: yazma geri-oku ile doğrulanır,"))
+        print(D("  reboot gerekir. Win7/Vista cihazlarda MSDM yerine SLIC vardır (okunabilir anahtar yok)."))
+        return 0
+    cmd=args[0] if args else "read"
+    class _A: pass
+    if cmd in ("read","oku"):
+        return cmd_wkey_read(_A()) or 0
+    if cmd in ("set","write","yaz","degistir"):
+        if len(args)<2:
+            if _JSON: return emit({"ok":False,"error":"anahtar gerekli"},1)
+            print(R("  Kullanım: wkey set <ANAHTAR>")); return 1
+        a=_A(); a.key=args[1]; a.yes=("--yes" in args or "-y" in args)
+        return cmd_wkey_set(a) or 0
+    die("Bilinmeyen wkey komutu: %s   (read|set)" % cmd)
+
+
 # ===================== BİRLEŞİK DAĞITICI =====================
 def _unified_usage():
     rule=D("─"*60)
@@ -1910,7 +2047,7 @@ def _unified_usage():
         return s
     sub=lambda s: print("        "+D(s))   # komut altı seçenek/alt-komut satırı
     print()
-    print("  "+B(Cy("ETA-112"))+" — "+B("Birleşik Parola Aracı")+"   "+D("OS · BIOS · MAC"))
+    print("  "+B(Cy("ETA-112"))+" — "+B("Birleşik Parola Aracı")+"   "+D("OS · BIOS · MAC · Windows"))
     print()
     print(rule)
     print(B("  KULLANIM"))
@@ -1921,8 +2058,10 @@ def _unified_usage():
     sub("--list · --dry-run · --help")
     print(row("bios <komut>", G("bios")+" "+D("<komut>"), "BIOS yönetici / kullanıcı parolası"))
     sub("read · set · clear <slot> · info · calibrate · --json")
-    print(row("mac <komut>", G("mac")+" "+D("<komut>"), "Ethernet MAC adresi oku / doğrula"))
-    sub("read · check <MAC> · --json")
+    print(row("mac <komut>", G("mac")+" "+D("<komut>"), "Ethernet MAC adresi oku / doğrula / değiştir"))
+    sub("read · check <MAC> · set <MAC> · --json")
+    print(row("wkey <komut>", G("wkey")+" "+D("<komut>"), "Windows ürün anahtarı (MSDM) oku / değiştir"))
+    sub("read · set <ANAHTAR> · --json")
     print()
     print(row("--help", Cy("--help"), "bu yardım"))
     print(rule)
@@ -1972,21 +2111,40 @@ def _mac_menu():
     return 0
 
 
+def _wkey_menu():
+    print()
+    print(C.B + "  Windows ürün anahtarı" + C.R)
+    print(C.DIM + "  1) Anahtarı oku (MSDM)" + C.R)
+    print(C.DIM + "  2) Anahtarı değiştir (flash MSDM)" + C.R)
+    print(C.DIM + "  0) Geri" + C.R)
+    hr()
+    s = ask("  Seçim: ").strip()
+    if s == "1":
+        return etawkey_main(["read"]) or 0
+    if s == "2":
+        k = ask("  Yeni anahtar (XXXXX-XXXXX-XXXXX-XXXXX-XXXXX): ").strip()
+        return etawkey_main(["set", k]) or 0
+    return 0
+
+
 def _menu():
     print()
     print(C.B + "  ETA-112 — Birleşik Parola Aracı" + C.R)
     print(C.DIM + "  1) İşletim sistemi kullanıcı parolası (canlı/çalışan disk)" + C.R)
     print(C.DIM + "  2) BIOS parolası (oku / ayarla / temizle)" + C.R)
     print(C.DIM + "  3) MAC adresi (oku / doğrula / değiştir)" + C.R)
+    print(C.DIM + "  4) Windows ürün anahtarı (oku / değiştir)" + C.R)
     print(C.DIM + "  0) Çıkış" + C.R)
     hr()
-    s = ask("  Seçim [1/2/3/0]: ").strip()
+    s = ask("  Seçim [1/2/3/4/0]: ").strip()
     if s == "1":
         return kps_main([]) or 0
     if s == "2":
         return _bios_menu()
     if s == "3":
         return _mac_menu()
+    if s == "4":
+        return _wkey_menu()
     return 0
 
 
@@ -2000,6 +2158,8 @@ def main():
         return kps_main(argv[1:]) or 0
     if argv and argv[0] in ("mac", "ethernet", "eth"):
         return etamac_main(argv[1:]) or 0
+    if argv and argv[0] in ("wkey", "windows", "winkey", "seri"):
+        return etawkey_main(argv[1:]) or 0
     if argv:
         if argv[0].startswith("-"):     # çıplak bayraklar -> kullanıcı modu (geriye uyum)
             return kps_main(argv) or 0
