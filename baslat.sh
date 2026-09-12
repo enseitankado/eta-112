@@ -99,12 +99,12 @@ except Exception:  # pragma: no cover
 
 # ------------------------------------------------------------------ UI
 class C:
-    R = "\033[0m"; B = "\033[1m"; DIM = "\033[2m"
+    R = "\033[0m"; B = "\033[1m"; DIM = "\033[2m"; INV = "\033[7m"
     CY = "\033[36m"; GR = "\033[32m"; RD = "\033[31m"; YL = "\033[33m"
 
 
 if not sys.stdout.isatty():
-    for _a in ("R", "B", "DIM", "CY", "GR", "RD", "YL"):
+    for _a in ("R", "B", "DIM", "INV", "CY", "GR", "RD", "YL"):
         setattr(C, _a, "")
 
 
@@ -345,6 +345,15 @@ def discover():
 def choose_install(installs):
     if len(installs) == 1:
         return installs[0]
+    if _menu_etkilesimli():
+        ogeler = [("%s  (%s, %s)%s" % (it["os"], it["dev"], it["size"],
+                                       "  ← çalışan sistem" if it.get("running") else ""), "")
+                  for it in installs]
+        ogeler.append(("İptal", ""))
+        i = _secim("Hedef kurulum", ogeler)
+        if i is None or i == len(ogeler) - 1:
+            die("İptal edildi.", 0)
+        return installs[i]
     title("Birden çok kurulum bulundu — hedefi seçin")
     for i, it in enumerate(installs):
         tag = "  %s← çalışan sistem%s" % (C.YL, C.R) if it.get("running") else ""
@@ -429,6 +438,20 @@ def select_user(mp):
                 show_all = True
                 continue
             die("Hedefte kullanıcı hesabı bulunamadı.")
+        if _menu_etkilesimli():
+            ogeler = [("%-16s UID %-6d %s" % (u["name"], u["uid"], u["gecos"]), "")
+                      for u in users]
+            gecis = "Yalnız girişli hesapları göster" if show_all \
+                else "Tüm hesapları göster (sistem hesapları dahil)"
+            ogeler.append((gecis, ""))
+            ogeler.append(("İptal", ""))
+            i = _secim("Hesap seç", ogeler)
+            if i is None or i == len(ogeler) - 1:
+                die("İptal edildi.", 0)
+            if i == len(ogeler) - 2:
+                show_all = not show_all
+                continue
+            return users[i]
         title("Kullanıcı hesapları")
         print_grid(users)
         hr()
@@ -2035,6 +2058,1123 @@ def etawkey_main(argv):
     die("Bilinmeyen wkey komutu: %s   (read|set)" % cmd)
 
 
+# ===================== BÖLÜM 5: DOKUNMATİK SÜRÜCÜ (etatouch) =====================
+# Pardus ETAP akıllı tahtalarda dokunmatik (eta-touchdrv) sürüm denemesi.
+#
+# Mimari (ayrıntı: dokunmatik/belgeler/mimari.md):
+#     USB → OtdDrv.ko → /dev/OtdUsbRaw000 → OtdTouchServer → /dev/input/eventX → X11
+# Kernel modülü DURUMSUZDUR: ham USB paketlerini taşır, koordinat yorumlamaz.
+# Kalibrasyon polinomunu kullanıcı uzayındaki sunucu uygular. Bu yüzden deneme
+# iki kademelidir:
+#     Kademe 1 — yalnız sunucu ikilisini değiştir (saniyeler, DKMS yok)
+#     Kademe 2 — .deb'i tam kur (modül + sunucu + servis + udev, DKMS derler)
+#
+# Paket sistemde /etc altında hiçbir şey yönetmez (conffiles yok); dokunmatiğe
+# ait tek müdahale yüzeyi .deb'in kendisidir.
+
+import re
+import hashlib
+import platform
+import urllib.parse
+import urllib.request
+
+TOUCH_PKG = "eta-touchdrv"
+TOUCH_DEPO = "https://raw.githubusercontent.com/enseitankado/eta-112/main/dokunmatik"
+TOUCH_YEDEK = "/var/backups/eta-112-dokunmatik"
+TOUCH_PIN = "/etc/apt/preferences.d/99-eta-112-dokunmatik"
+
+# lsusb'de aranacak kimlikler -> (tip, 0.5.x servis örneği)
+TOUCH_AYGITLAR = (
+    ("2621:2201", "otd"), ("2621:4501", "otd"),
+    ("6615:0084", "optical"), ("6615:0085", "optical"), ("6615:0086", "optical"),
+    ("6615:0087", "optical"), ("6615:0088", "optical"), ("6615:0c20", "optical"),
+)
+
+
+def _t_kok():
+    return 0 if os.geteuid() == 0 else None
+
+
+def _t_run(cmd, inp=None):
+    """run() gibi, ama komut kurulu değilse patlamaz (canlı ortamda eksik olabilir)."""
+    try:
+        return run(cmd, inp=inp)
+    except (FileNotFoundError, PermissionError):
+        return subprocess.CompletedProcess(cmd, 127, "", f"{cmd[0]}: bulunamadı")
+
+
+def _t_aygit():
+    """Takılı dokunmatik paneli bul. -> (tip, 'VVVV:PPPP') | (None, None)"""
+    r = _t_run(["lsusb"])
+    for kimlik, tip in TOUCH_AYGITLAR:
+        if kimlik in r.stdout:
+            return tip, kimlik
+    return None, None
+
+
+def _t_kurulu():
+    """Kurulu eta-touchdrv sürümü. -> str | None"""
+    r = _t_run(["dpkg-query", "-W", "-f=${Version}", TOUCH_PKG])
+    v = r.stdout.strip()
+    return v if r.returncode == 0 and v else None
+
+
+def _t_servis(tip):
+    """Bu sistemdeki dokunmatik servis biriminin adı.
+
+    0.5.0+ şablon birim kullanır (eta-touchdrv@otd / @optical); daha eskiler tek
+    birim. Hangisinin kurulu olduğuna dosya sisteminden karar veririz."""
+    for kok in ("/lib/systemd/system", "/usr/lib/systemd/system"):
+        if os.path.exists(f"{kok}/{TOUCH_PKG}@.service"):
+            return f"{TOUCH_PKG}@{tip or 'otd'}.service"
+    return f"{TOUCH_PKG}.service"
+
+
+def _t_sunucu_yolu(tip):
+    """Çalışan sunucu ikilisinin /usr/bin altındaki yolu."""
+    if tip == "optical":
+        adaylar = ["OpticalService", "OpticalTouchServer.x86_64", "opticServer"]
+    else:
+        adaylar = [f"OtdTouchServer.{platform.machine()}", "OtdTouchServer",
+                   "OpticalTouchServer.x86_64"]
+    for ad in adaylar:
+        y = f"/usr/bin/{ad}"
+        if os.path.exists(y):
+            return y
+    return None
+
+
+def _t_deb_sunucu(cikar, tip):
+    """Açılmış paket ağacında bu panele ait sunucu ikilisini bul.
+
+    Üç yerleşim var:
+      resmi  : usr/bin/OtdTouchServer[.arch]  (otd) · usr/bin/OpticalService|opticServer (optical)
+      vrdons : usr/bin/touch4/OpticalTouchServer.arch (otd) · usr/bin/touch2/... (optical)
+    """
+    kok = os.path.join(cikar, "usr", "bin")
+    arch = platform.machine()
+    bulunan = []
+    for dizin, _alt, dosyalar in os.walk(kok):
+        gorece = os.path.relpath(dizin, kok)
+        for ad in dosyalar:
+            yol = os.path.join(dizin, ad)
+            if gorece in ("touch2", "touch4"):          # vrdons yerleşimi
+                if ((gorece == "touch2") == (tip == "optical")
+                        and ad.endswith(arch) and "Server" in ad):
+                    bulunan.append(yol)
+            elif tip == "optical":
+                if ad in ("OpticalService", "opticServer"):
+                    bulunan.append(yol)
+            else:
+                if ad in (f"OtdTouchServer.{arch}", "OtdTouchServer"):
+                    bulunan.append(yol)
+    return bulunan[0] if bulunan else None
+
+
+def _t_servis_durum(birim):
+    r = _t_run(["systemctl", "is-active", birim])
+    return r.stdout.strip() or "bilinmiyor"
+
+
+def _t_event_aygitlari():
+    """Dokunmatik panelin ürettiği /dev/input/eventX düğümleri."""
+    bulunan = []
+    try:
+        with open("/proc/bus/input/devices") as f:
+            blok = []
+            for satir in f:
+                if satir.strip():
+                    blok.append(satir.strip())
+                    continue
+                metin = " ".join(blok)
+                if re.search(r"(?i)(otd|optical|touch|irtouch)", metin):
+                    m = re.search(r"(event\d+)", metin)
+                    ad = re.search(r'N: Name="([^"]*)"', metin)
+                    if m:
+                        bulunan.append((m.group(1), ad.group(1) if ad else "?"))
+                blok = []
+    except OSError:
+        pass
+    return bulunan
+
+
+def _t_indir(gorece_yol, yerel_kok=None):
+    """dokunmatik/ altındaki bir dosyayı getir. -> bytes"""
+    if yerel_kok:
+        with open(os.path.join(yerel_kok, gorece_yol), "rb") as f:
+            return f.read()
+    import urllib.request
+    url = f"{TOUCH_DEPO}/{urllib.parse.quote(gorece_yol)}"
+    with urllib.request.urlopen(url, timeout=60) as r:
+        return r.read()
+
+
+def _t_manifest(yerel_kok=None, sessiz=False):
+    try:
+        ham = _t_indir("surumler.json", yerel_kok)
+    except Exception as e:
+        if sessiz:
+            return None
+        die(f"Sürüm listesi alınamadı: {e}\n"
+            f"    İnternet yoksa depo klonunu gösterin:  --yerel /yol/eta-112/dokunmatik")
+    return json.loads(ham.decode("utf-8"))
+
+
+def _t_nesil_bul(man, oz):
+    """Çalışan sunucu ikilisinin sha256'sından hangi sürümlerden geldiğini bul.
+
+    0.5.x ikilileri dh_strip'ten geçmediği için depodaki ham blob özetiyle birebir
+    tutar; eski sürümlerde tutmayabilir. Bulunamazsa None döner."""
+    if not man:
+        return None
+    esler = [k["surum"] for k in man["surumler"]
+             if (k.get("upstream_blob") or {}).get("otd_sunucu", "").startswith(oz[:16])
+             or (k.get("upstream_blob") or {}).get("optik_sunucu", "").startswith(oz[:16])]
+    return esler or None
+
+
+def _t_paket_getir(kayit, yerel_kok=None):
+    """Paketi indirip sha256'sını doğrula. -> geçici .deb yolu"""
+    ham = _t_indir(kayit["dosya"], yerel_kok)
+    if hashlib.sha256(ham).hexdigest() != kayit["sha256"]:
+        die(f"{kayit['surum']}: sha256 tutmadı — indirme bozuk, işlem durduruldu.")
+    hedef = os.path.join(tempfile.mkdtemp(prefix="eta112-touch-"),
+                         os.path.basename(kayit["dosya"]))
+    with open(hedef, "wb") as f:
+        f.write(ham)
+    return hedef
+
+
+def _t_kayit(man, surum):
+    for k in man["surumler"]:
+        if k["surum"] == surum and k["sinif"] == "resmi":
+            return k
+    for k in man["surumler"]:
+        if k["surum"] == surum:
+            return k
+    return None
+
+
+# --------------------------------------------------------------- yedek / geri alma
+def _t_yedek_al(tip):
+    """Başlangıç durumunu sakla: kurulu sürüm + çalışan sunucu ikilisinin kopyası."""
+    os.makedirs(TOUCH_YEDEK, exist_ok=True)
+    durum = {"surum": _t_kurulu(), "tip": tip, "sunucu": None}
+    yol = _t_sunucu_yolu(tip)
+    if yol:
+        hedef = os.path.join(TOUCH_YEDEK, os.path.basename(yol))
+        if not os.path.exists(hedef):          # ilk yedeği koru, üzerine yazma
+            shutil.copy2(yol, hedef)
+        durum["sunucu"] = {"yol": yol, "yedek": hedef}
+    with open(os.path.join(TOUCH_YEDEK, "baslangic.json"), "w") as f:
+        json.dump(durum, f, ensure_ascii=False, indent=2)
+    return durum
+
+
+def _t_yedek_oku():
+    try:
+        with open(os.path.join(TOUCH_YEDEK, "baslangic.json")) as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return None
+
+
+def _t_sunucu_yaz(kaynak, hedef, tip):
+    """Sunucu ikilisini yerine koy ve servisi yeniden başlat."""
+    shutil.copy2(kaynak, hedef)
+    os.chmod(hedef, 0o755)
+    _t_run(["systemctl", "restart", _t_servis(tip)])
+    time.sleep(2.0)
+
+
+def _t_geri_al(durum, tip, sessiz=False):
+    """Başlangıç durumuna dön: önce paketi, sonra sunucu ikilisini geri koy."""
+    if not durum:
+        return False
+    hedef = durum.get("surum")
+    if hedef and _t_kurulu() != hedef:
+        man = _t_manifest(durum.get("yerel_kok"))
+        kayit = _t_kayit(man, hedef) if man else None
+        if kayit:
+            _t_deb_kur(_t_paket_getir(kayit, durum.get("yerel_kok")), tip)
+    # Paket kurulumu ikiliyi tazeler; Kademe 1 yedeğini ondan SONRA geri yaz.
+    s = durum.get("sunucu")
+    if s and os.path.exists(s["yedek"]):
+        _t_sunucu_yaz(s["yedek"], s["yol"], tip)
+    if not sessiz:
+        ok(f"Başlangıç durumuna dönüldü (sürüm {durum.get('surum') or '?'}).")
+    return True
+
+
+# --------------------------------------------------------------- kurulum
+def _t_deb_kur(deb, tip):
+    """dpkg -i ile kur. Düşürme (downgrade) da yapabilmeli.
+
+    Sürüm aileleri farklı servis/udev düzeni kullanır (0.5.0+ eta-touchdrv@.service
+    şablonu + SYSTEMD_WANTS, öncesi tek birim + RUN+=touchdrv_restart). Bu yüzden
+    birim adı kurulumdan SONRA yeniden hesaplanır ve udev yeniden tetiklenir."""
+    r = _t_run(["dpkg", "-i", "--force-downgrade", "--force-confnew", deb])
+    if r.returncode != 0:
+        return False, (r.stderr or r.stdout).strip()
+    _t_run(["systemctl", "daemon-reload"])
+    _t_run(["udevadm", "control", "--reload-rules"])
+    _t_run(["udevadm", "trigger", "--subsystem-match=usb", "--action=add"])
+    time.sleep(1.0)
+    _t_run(["systemctl", "restart", _t_servis(tip)])
+    time.sleep(2.0)
+    return True, ""
+
+
+def _t_dkms_derlendi(surum):
+    """Bu sürümün kernel modülü gerçekten derlenmiş mi?"""
+    r = _t_run(["dkms", "status", f"{TOUCH_PKG}/{surum}"])
+    return "installed" in (r.stdout or "").lower()
+
+
+# --------------------------------------------------------------- komutlar
+def cmd_touch_durum(a):
+    tip, kimlik = _t_aygit()
+    surum = _t_kurulu()
+    birim = _t_servis(tip)
+    title("Dokunmatik — durum")
+    if tip:
+        print(f"  Panel          : {G(kimlik)}  {D('(' + ('OTD / 4 kamera' if tip == 'otd' else 'Optical / 2 kamera') + ')')}")
+    else:
+        print(f"  Panel          : {Y('bulunamadı')}  {D('(lsusb bilinen kimlik göstermiyor)')}")
+    print(f"  Kurulu sürüm   : {G(surum) if surum else Y('kurulu değil')}")
+    print(f"  Servis         : {Cy(birim)}  → {_t_servis_durum(birim)}")
+    yol = _t_sunucu_yolu(tip)
+    if yol:
+        with open(yol, "rb") as f:
+            oz = hashlib.sha256(f.read()).hexdigest()[:16]
+        print(f"  Sunucu ikilisi : {Cy(yol)}  {D('sha256:' + oz)}")
+        # Kademe 1 denemesinden sonra dpkg hâlâ eski sürümü gösterir; asıl
+        # çalışan ikiliyi özetinden tanımaya çalış.
+        esler = _t_nesil_bul(_t_manifest(a.yerel, sessiz=True), oz)
+        if esler:
+            uyum = surum in esler
+            print(f"  Çalışan sunucu : {(G if uyum else Y)(' / '.join(esler))}"
+                  + ("" if uyum else f"  {Y('← paket kaydıyla uyuşmuyor (Kademe 1 denemesi etkin)')}"))
+    evs = _t_event_aygitlari()
+    if evs:
+        for ev, ad in evs:
+            print(f"  Girdi aygıtı   : {G('/dev/input/' + ev)}  {D(ad)}")
+    else:
+        print(f"  Girdi aygıtı   : {Y('yok')}  {D('sunucu event düğümü üretmemiş')}")
+    print(f"  Çekirdek       : {Cy(platform.release())}")
+    yd = _t_yedek_oku()
+    if yd:
+        print(f"  Yedek          : {D('başlangıç sürümü ' + str(yd.get('surum')) + ' — geri almak için: dokunmatik geri')}")
+    tutulu = TOUCH_PKG in _t_run(["apt-mark", "showhold"]).stdout.split()
+    if tutulu:
+        print(f"  apt            : {G('tutuluyor (hold)')} — otomatik güncelleme sürümü değiştirmez")
+    hr()
+    return 0
+
+
+def cmd_touch_liste(a):
+    man = _t_manifest(a.yerel)
+    kurulu = _t_kurulu()
+    yeni_cekirdek = tuple(int(x) for x in platform.release().split(".")[:2]) >= (6, 8)
+    aylar = {"Jan": "01", "Feb": "02", "Mar": "03", "Apr": "04", "May": "05", "Jun": "06",
+             "Jul": "07", "Aug": "08", "Sep": "09", "Oct": "10", "Nov": "11", "Dec": "12"}
+
+    def _tarih(s):
+        m = re.search(r"(\d{1,2}) (\w{3}) (\d{4})", s or "")
+        return f"{m.group(3)}-{aylar.get(m.group(2), '??')}-{m.group(1):0>2}" if m else ""
+
+    title("Dokunmatik — arşivdeki sürümler")
+    print(f"  {D('sunucu/modül nesli aynı olan sürümler aynı sonucu verir; deneme sırası bunları atlar')}")
+    print()
+    print("  " + D(f"{'sürüm':<13}{'tarih':<12}{'sun':<7}{'mod':<7}{'DKMS':<10}{'sınıf'}"))
+    hr()
+    for k in man["surumler"]:
+        isaret = G("●") if k["surum"] == kurulu and k["sinif"] == "resmi" else " "
+        if k["guncel_cekirdekte_derlenir"]:
+            dkms, boya = "evet", G
+        elif yeni_cekirdek:
+            dkms, boya = "şüpheli", Y
+        else:
+            dkms, boya = "—", D
+        print(f"{isaret} {k['surum']:<13}{_tarih(k.get('tarih')):<12}{k['sunucu_nesli']:<7}"
+              f"{k['modul_nesli']:<7}{boya(f'{dkms:<10}')}{D(k['sinif'])}")
+    hr()
+    print(f"  {D('Deneme sırası:')} {' → '.join(man['deneme_sirasi'])}")
+    print(f"  {D('DKMS sütunu: modülün bu çekirdekte (' + platform.release() + ') derlenmesi bekleniyor mu.')}")
+    return 0
+
+
+def _t_sunucu_imzasi(kayit, tip):
+    """Bu paketin, ilgili panel tipine ait sunucu ikilisinin kimliği.
+
+    Paket içindeki baytlar kullanılamaz: resmi paketler dh_strip'ten geçmiş,
+    git'ten yeniden paketlediklerimiz geçmemiştir; aynı program farklı özet verir.
+    Upstream ham blob özeti tek karşılaştırılabilir ölçüdür."""
+    u = kayit.get("upstream_blob") or {}
+    oz = u.get("optik_sunucu" if tip == "optical" else "otd_sunucu")
+    return oz if oz and oz != "-" else None
+
+
+def _t_adaylar(man, tip, kademe):
+    """Deneme sırasını bu sisteme göre süz ve önceliklendir."""
+    kurulu = _t_kurulu()
+    kurulu_kayit = _t_kayit(man, kurulu) if kurulu else None
+    kurulu_sunucu = _t_sunucu_imzasi(kurulu_kayit, tip) if kurulu_kayit else None
+    yeni_cekirdek = tuple(int(x) for x in platform.release().split(".")[:2]) >= (6, 8)
+    liste, gorulen = [], set()
+    for surum in man["deneme_sirasi"]:
+        k = _t_kayit(man, surum)
+        if not k:
+            continue
+        if surum == kurulu:
+            continue                    # zaten çalışan sürüm; temel durum
+        if kademe == 2 and yeni_cekirdek and not k["guncel_cekirdekte_derlenir"]:
+            continue                    # modülü bu çekirdekte derlenmez
+        if kademe == 1:
+            # Kademe 1 yalnız sunucuyu değiştirir. Bu panel tipi için sunucusu
+            # kurulu olanla aynı olan sürüm hiçbir şey değiştirmez -- örneğin
+            # Optical (6615) sunucusu 0.2.0'dan beri hiç değişmemiştir.
+            imza = _t_sunucu_imzasi(k, tip)
+            if imza is not None and (imza == kurulu_sunucu or imza in gorulen):
+                continue
+            if imza is not None:
+                gorulen.add(imza)
+        liste.append(k)
+    if kademe == 1:
+        # Kurulu modülle aynı nesilden yayınlanmış sunucular önce denensin;
+        # farklı nesildekiler ioctl uyuşmazlığı yüzünden boşa adım olabilir.
+        liste.sort(key=lambda k: _t_uyumlu_mu(k, kurulu_kayit) is not True)
+    return liste
+
+
+def _t_uyumlu_mu(kayit, kurulu_kayit):
+    """Kademe 1'de sunucu değiş-tokuşu bu modülle güvenli mi?
+
+    OtdDrv.ko ↔ OtdTouchServer arasındaki ioctl protokolü sürüme bağlı; aynı
+    modül nesliyle yayınlanmış sunucular birbirinin yerine konabilir."""
+    if not kurulu_kayit:
+        return None
+    a = kayit.get("kademe1_uyumlu_modul")
+    b = kurulu_kayit.get("kademe1_uyumlu_modul")
+    if a is None or b is None:
+        return None
+    return a == b
+
+
+def cmd_touch_dene(a):
+    if _t_kok() is None:
+        die("Bunun için 'sudo' gerekli.")
+    tip, kimlik = _t_aygit()
+    if not tip and not a.zorla:
+        die("Bilinen bir dokunmatik panel bulunamadı (lsusb).\n"
+            "    Panelin bağlı olduğundan eminseniz:  dokunmatik dene --zorla")
+    tip = tip or "otd"
+    man = _t_manifest(a.yerel)
+    kurulu = _t_kurulu()
+    kurulu_kayit = _t_kayit(man, kurulu) if kurulu else None
+
+    adaylar = _t_adaylar(man, tip, a.kademe)
+    if a.surum:
+        k = _t_kayit(man, a.surum)
+        if not k:
+            die(f"Arşivde böyle bir sürüm yok: {a.surum}   ('dokunmatik liste')")
+        adaylar = [k]
+    if not adaylar:
+        if a.kademe == 1 and tip == "optical":
+            die("Bu panel tipi (Optical / 6615) için denenecek farklı sunucu yok.\n"
+                "    Arşivdeki tüm sürümler 0.2.0'dan beri aynı OpticalService ikilisini\n"
+                "    taşıyor; sunucu değiş-tokuşu hiçbir şeyi değiştirmez.\n"
+                "    Kernel modülü sürümler arasında değişiyor:  dokunmatik dene --kademe 2")
+        die("Denenecek sürüm kalmadı.")
+
+    title(f"Dokunmatik — sürüm denemesi (Kademe {a.kademe})")
+    print(f"  Panel          : {G(kimlik or '?')}  {D(tip)}")
+    print(f"  Kurulu sürüm   : {G(kurulu) if kurulu else Y('yok')}")
+    print(f"  Servis         : {Cy(_t_servis(tip))}")
+    if a.kademe == 1:
+        print(f"  {D('Yalnız sunucu ikilisi değişecek; kernel modülü ve DKMS katmanı korunacak.')}")
+    else:
+        print(f"  {D('Paket tam kurulacak; DKMS her adımda modülü yeniden derleyecek (yavaş).')}")
+    print(f"  {D('Denenecek:')} {' → '.join(k['surum'] for k in adaylar)}")
+    print()
+    print(f"  {WARN}  {Y('Deneme sırasında dokunmatik geçici olarak çalışmayabilir.')}")
+    print(f"     {D('Onay vermeden çıkarsanız başlangıç durumuna otomatik dönülür.')}")
+    hr()
+    if ask("  Başlansın mı? [E/h]: ").strip().lower() in ("h", "hayır", "hayir", "n"):
+        return 0
+
+    durum = _t_yedek_al(tip)
+    durum["yerel_kok"] = a.yerel
+    onaylanan = None
+    try:
+        for i, k in enumerate(adaylar, 1):
+            print()
+            print(f"  {C.B}[{i}/{len(adaylar)}] {k['surum']}{C.R}  "
+                  f"{D('sunucu ' + k['sunucu_nesli'] + ' · modül ' + k['modul_nesli'])}")
+            if k.get("not"):
+                print(f"      {D(k['not'])}")
+            if k["sinif"] != "resmi":
+                print(f"      {Y('resmi değil — ' + k['sinif'])}")
+
+            uyum = _t_uyumlu_mu(k, kurulu_kayit) if a.kademe == 1 else None
+            if uyum is False:
+                print(f"      {WARN} {Y('Farklı modül nesliyle yayınlanmış sunucu; bu modülle çalışmayabilir.')}")
+
+            if a.kademe == 1 and k["sinif"] == "ucuncu-taraf":
+                warn("Üçüncü taraf çatal kendi kernel modülünü kullanır; yalnız sunucu "
+                     "değiş-tokuşu anlamsız. Bunu Kademe 2 ile deneyin.")
+                continue
+
+            deb = progress_timed(f"{k['surum']} indiriliyor",
+                                 lambda k=k: _t_paket_getir(k, a.yerel), est=8.0)
+
+            if a.kademe == 1:
+                cikar = tempfile.mkdtemp(prefix="eta112-deb-")
+                _t_run(["dpkg-deb", "-x", deb, cikar])
+                yeni = _t_deb_sunucu(cikar, tip)
+                if not yeni:
+                    warn("Bu pakette bu panele uygun sunucu ikilisi yok — atlanıyor.")
+                    continue
+                hedef = _t_sunucu_yolu(tip) or f"/usr/bin/{os.path.basename(yeni)}"
+                run_msg(f"{os.path.basename(hedef)} değiştiriliyor ve servis yeniden başlatılıyor...",
+                        lambda: _t_sunucu_yaz(yeni, hedef, tip))
+            else:
+                basarili, hata = progress_timed(
+                    f"{k['surum']} kuruluyor (DKMS derliyor)",
+                    lambda: _t_deb_kur(deb, tip), est=90.0)
+                if not basarili:
+                    warn(f"Kurulum başarısız — atlanıyor.  {D(hata.splitlines()[-1] if hata else '')}")
+                    continue
+                if not _t_dkms_derlendi(k["surum"]):
+                    warn("DKMS modülü derlenemedi (bu çekirdekte beklenen olabilir) — atlanıyor.")
+                    continue
+
+            dur = _t_servis_durum(_t_servis(tip))   # birim adı sürümle değişebilir
+            evs = _t_event_aygitlari()
+            print(f"      servis: {G(dur) if dur == 'active' else Y(dur)}   "
+                  f"girdi aygıtı: {G('/dev/input/' + evs[0][0]) if evs else Y('yok')}")
+            if dur != "active" or not evs:
+                warn("Sunucu event düğümü üretmedi; bu sürüm bu sistemde çalışmıyor.")
+                if ask("      Yine de ekrana dokunup denemek ister misiniz? [e/H]: "
+                       ).strip().lower() not in ("e", "evet", "y"):
+                    continue
+
+            print()
+            print(f"      {C.B}Şimdi ekrana dokunun ve kalibrasyonu kontrol edin.{C.R}")
+            c = ask("      Sorun düzeldi mi? [e = evet · h = hayır, sıradakine geç · "
+                    "d = dur]: ").strip().lower()
+            if c in ("e", "evet", "y"):
+                onaylanan = k
+                break
+            if c in ("d", "dur", "q"):
+                break
+    except KeyboardInterrupt:
+        print()
+        warn("İptal edildi.")
+
+    print()
+    if not onaylanan:
+        hr()
+        warn("Düzelten sürüm bulunamadı.")
+        run_msg("Başlangıç durumuna dönülüyor...",
+                lambda: _t_geri_al(durum, tip, sessiz=True))
+        ok(f"Başlangıç durumu geri yüklendi (sürüm {durum.get('surum') or '?'}).")
+        return 1
+
+    hr()
+    ok(f"Düzelten sürüm: {G(onaylanan['surum'])}")
+    if ask("  Kalıcı hale getirilsin mi? [E/h]: ").strip().lower() in ("h", "hayır", "hayir", "n"):
+        warn("Kalıcılaştırılmadı. Bir sonraki apt güncellemesi bu sürümü geri alabilir.")
+        print(f"  {D('Sonra kalıcılaştırmak için:  eta-112.py dokunmatik kalici ' + onaylanan['surum'])}")
+        return 0
+    return _t_kalicilastir(onaylanan, tip, a.yerel, a.kademe)
+
+
+def _t_kalicilastir(kayit, tip, yerel, kademe):
+    """Sürümü tam kur, apt'yi bu sürüme sabitle.
+
+    Kademe 1 yalnız /usr/bin'deki dosyayı değiştirir; paket veritabanı hâlâ eski
+    sürümü gösterir ve ilk apt güncellemesinde dosya geri gelir. Bu yüzden
+    kalıcılaştırma her durumda tam kurulumdan geçer."""
+    surum = kayit["surum"]
+    if kademe == 1 or _t_kurulu() != surum:
+        deb = _t_paket_getir(kayit, yerel)
+        basarili, hata = progress_timed(f"{surum} tam kuruluyor",
+                                        lambda: _t_deb_kur(deb, tip), est=90.0)
+        if not basarili:
+            err(f"Tam kurulum başarısız: {hata.splitlines()[-1] if hata else ''}")
+            warn("Sunucu ikilisi yerinde ama paket kaydı güncellenmedi; "
+                 "kalıcı değil.")
+            return 1
+        if not _t_dkms_derlendi(surum):
+            warn("DKMS modülü derlenemedi. Sunucu çalışıyor olabilir ama modül "
+                 "bir sonraki çekirdek güncellemesinde kaybolur.")
+
+    _t_run(["apt-mark", "hold", TOUCH_PKG])
+    try:
+        with open(TOUCH_PIN, "w") as f:
+            f.write(
+                "# eta-112 tarafından yazıldı — dokunmatik sürümü sabitlendi.\n"
+                "# Kaldırmak için:  eta-112.py dokunmatik serbest\n"
+                f"Package: {TOUCH_PKG}\n"
+                f"Pin: version {surum}\n"
+                "Pin-Priority: 1001\n")
+    except OSError as e:
+        warn(f"apt pin yazılamadı: {e}")
+
+    hr()
+    ok(f"{G(surum)} kuruldu ve sabitlendi.")
+    print(f"  {D('apt-mark hold + ' + TOUCH_PIN)}")
+    print(f"  {D('Sabitlemeyi kaldırmak için:  eta-112.py dokunmatik serbest')}")
+    return 0
+
+
+def cmd_touch_kalici(a):
+    if _t_kok() is None:
+        die("Bunun için 'sudo' gerekli.")
+    man = _t_manifest(a.yerel)
+    kayit = _t_kayit(man, a.surum)
+    if not kayit:
+        die(f"Arşivde böyle bir sürüm yok: {a.surum}   ('dokunmatik liste')")
+    tip, _ = _t_aygit()
+    title(f"Dokunmatik — {a.surum} kalıcı hale getiriliyor")
+    return _t_kalicilastir(kayit, tip or "otd", a.yerel, kademe=2)
+
+
+def cmd_touch_serbest(a):
+    if _t_kok() is None:
+        die("Bunun için 'sudo' gerekli.")
+    _t_run(["apt-mark", "unhold", TOUCH_PKG])
+    if os.path.exists(TOUCH_PIN):
+        os.remove(TOUCH_PIN)
+    ok("Sabitleme kaldırıldı; apt yeniden güncelleyebilir.")
+    return 0
+
+
+def cmd_touch_geri(a):
+    if _t_kok() is None:
+        die("Bunun için 'sudo' gerekli.")
+    durum = _t_yedek_oku()
+    if not durum:
+        die(f"Yedek bulunamadı ({TOUCH_YEDEK}). Geri alınacak bir şey yok.")
+    tip = durum.get("tip") or "otd"
+    title("Dokunmatik — başlangıç durumuna dönülüyor")
+    print(f"  Hedef sürüm    : {G(str(durum.get('surum')))}")
+    durum["yerel_kok"] = a.yerel
+    _t_geri_al(durum, tip)
+    return 0
+
+
+# ------------------------------------------------------------------ kalibrasyon (EEPROM)
+# Dokunmatik panelin kalibrasyon bloklarini cihazdan dogrudan okur/yazar.
+#
+# TASIMA KATMANI — kesin. Kaynagi GPL kernel modulu (OtdDrv.h / OtdDrv.c,
+# OpticalDrv.h / OpticalDrv.c; paketin /usr/src agacinda):
+#     ioctl(fd, 0x0010_LLLL, buf)  -> SET_REPORT
+#         usb_control_msg(sndctrlpipe, bRequest=0, bmRequestType=0x40, 0, 0, buf, LLLL)
+#     ioctl(fd, 0x0011_LLLL, buf)  -> GET_REPORT
+#         usb_control_msg(rcvctrlpipe, bRequest=0, bmRequestType=0xc0, 0, 0, buf, LLLL)
+# Yani saticiya ozel (vendor) kontrol transferi; tum protokol 64 baytlik yukun icinde.
+#
+# PAKET BICIMI — Optical (6615) icin kesin. OpticalService ikilisinin sembollu
+# surumunden (0.3.6~tbt1, `packageBuild` @0x401606) sokulerek cikarildi:
+#     [0]        0xAA
+#     [1]        tur   (1 = set, 2 = get)
+#     [2]        komut
+#     [3]        yuk_uzunlugu + 1
+#     [4]        indeks
+#     [5..]      yuk
+#     [5+n]      saglama = (0x55 + toplam(paket[0 .. n+4])) & 0xFF
+# Cevap (deviceGetFeature @0x4016d1): paket[0]==0xAA veya paket[1]==0x12 veya
+# paket[2]==komut ise gecerli; yuk yine ofset 5'ten baslar. Cevapta saglama
+# DOGRULANMIYOR (ikili de dogrulamiyor).
+#
+# KOMUT HARITASI — Optical icin kesin; OpticalService `main` (@0x405d74) acilista
+# tam olarak bu diziyi calistirir.
+#
+# OTD (2621) tarafinda tasima katmani ayni, ancak komut kimlikleri DOGRULANMADI:
+# OtdTouchServer statik derlenmis ve sembolsuz. Bu yuzden OTD icin okuma yalnizca
+# --dene bayragiyla, deneysel olarak yapilir.
+
+import array
+import fcntl
+
+KALIB_SET_REPORT = 0x00100000
+KALIB_GET_REPORT = 0x00110000
+KALIB_PAKET = 0x40          # tum komutlar 64 baytlik rapor kullanir
+KALIB_BEKLE = 0.010         # ikilinin her ioctl arasinda bekledigi sure (10 ms)
+KALIB_YUK_OFSET = 5
+KALIB_OKU_ENCOK = KALIB_PAKET - KALIB_YUK_OFSET       # 59: ofset 5..63
+KALIB_YAZ_ENCOK = KALIB_PAKET - KALIB_YUK_OFSET - 1   # 58: son bayt saglama
+
+# (komut, indeks, cevap_uzunlugu, ad)
+#
+# NOT — uretici ikilisinde bir yigin tasmasi var: main, (0x30, 1) blogunu 0x48=72
+# bayt olarak istiyor, ama deviceGetFeature 64 baytlik yigin tamponunun 5.
+# ofsetinden 72 bayt kopyaliyor; son 13 bayt bitisik yigin cop verisi. Bunu
+# taklit etmiyoruz: okuma 59 bayta (tamponun gercek sonu) kirpiliyor.
+KALIB_BLOKLAR = (
+    (0x10, 0, 0x3a, "kamera-0"),
+    (0x10, 1, 0x3a, "kamera-1"),
+    (0x30, 0, 0x3a, "yapilandirma-0"),
+    (0x30, 1, 0x48, "yapilandirma-1"),
+    (0x14, 0, 0x3a, "ekran-0"),
+    (0x14, 1, 0x3a, "ekran-1"),
+)
+KALIB_MOD_KOMUTU = 0x71     # yuk 1 = yapilandirma moduna gir, 0 = cik
+
+
+def _k_aygit_yolu(tip):
+    """Sürücünün oluşturduğu karakter aygıtı."""
+    kalip = "/dev/IRTouchOptical%03d" if tip == "optical" else "/dev/OtdUsbRaw%03d"
+    for i in range(4):
+        y = kalip % i
+        if os.path.exists(y):
+            return y
+    return None
+
+
+def _k_paket_kur(tur, komut, indeks, yuk=b""):
+    """OpticalService `packageBuild` (@0x401606) ile birebir aynı."""
+    n = len(yuk)
+    if n > KALIB_YAZ_ENCOK:
+        raise ValueError(f"yük {KALIB_YAZ_ENCOK} bayttan uzun olamaz ({n} verildi)")
+    p = bytearray(KALIB_PAKET)
+    p[0] = 0xAA
+    p[1] = tur & 0xFF
+    p[2] = komut & 0xFF
+    p[3] = (n + 1) & 0xFF
+    p[4] = indeks & 0xFF
+    p[5:5 + n] = yuk
+    p[5 + n] = (0x55 + sum(p[0:n + 5])) & 0xFF
+    return bytes(p)
+
+
+def _k_ioctl(fd, taban, veri):
+    tampon = array.array("B", veri)
+    fcntl.ioctl(fd, taban | KALIB_PAKET, tampon, True)
+    return bytes(tampon)
+
+
+def _k_oku_blok(fd, komut, indeks, uzunluk):
+    """getCommand (@0x40178b): istek paketini yaz, 10 ms bekle, cevabı oku."""
+    _k_ioctl(fd, KALIB_SET_REPORT, _k_paket_kur(2, komut, indeks))
+    time.sleep(KALIB_BEKLE)
+    cevap = _k_ioctl(fd, KALIB_GET_REPORT, bytes(KALIB_PAKET))
+    time.sleep(KALIB_BEKLE)
+    if not (cevap[0] == 0xAA or cevap[1] == 0x12 or cevap[2] == komut):
+        raise OSError(f"geçersiz cevap başlığı: {cevap[:5].hex(' ')}")
+    n = min(uzunluk, KALIB_OKU_ENCOK)
+    return cevap[KALIB_YUK_OFSET:KALIB_YUK_OFSET + n], cevap
+
+
+def _k_yaz_blok(fd, komut, indeks, yuk):
+    """setCommand (@0x40183d): yük taşıyan set paketini yaz, sonucu oku."""
+    _k_ioctl(fd, KALIB_SET_REPORT, _k_paket_kur(1, komut, indeks, yuk))
+    time.sleep(KALIB_BEKLE)
+    _k_ioctl(fd, KALIB_GET_REPORT, bytes(KALIB_PAKET))
+    time.sleep(KALIB_BEKLE)
+
+
+def _k_mod(fd, ac):
+    """Yapılandırma moduna gir/çık — main açılışta bunu iki indeks için yapar."""
+    for indeks in (0, 1):
+        _k_yaz_blok(fd, KALIB_MOD_KOMUTU, indeks, b"\x01" if ac else b"\x00")
+
+
+def _k_servis_durdur(tip):
+    """Sunucu cihazı sürekli okuyor; kontrol transferlerinden önce durdurulmalı."""
+    birim = _t_servis(tip)
+    calisiyordu = _t_servis_durum(birim) == "active"
+    if calisiyordu:
+        _t_run(["systemctl", "stop", birim])
+        time.sleep(0.5)
+    return birim, calisiyordu
+
+
+def _k_floatlar(ham):
+    n = len(ham) // 4
+    return list(struct.unpack("<%df" % n, ham[:n * 4]))
+
+
+def _k_snapshot(tip, deneysel=False):
+    """Tüm blokları oku. -> dict"""
+    yol = _k_aygit_yolu(tip)
+    if not yol:
+        die("Sürücünün aygıt düğümü yok "
+            f"({'IRTouchOptical' if tip == 'optical' else 'OtdUsbRaw'}).\n"
+            "    Panel bağlı ve modül yüklü mü?  'dokunmatik durum' ile bakın.")
+    if tip != "optical" and not deneysel:
+        die("OTD (2621) panellerde komut kimlikleri doğrulanmadı.\n"
+            "    Taşıma katmanı aynı, ancak hangi komutun kalibrasyonu döndürdüğü\n"
+            "    bilinmiyor. Optical komut kümesini denemek için:  --dene")
+
+    birim, calisiyordu = _k_servis_durdur(tip)
+    bloklar, hata = [], None
+    try:
+        fd = os.open(yol, os.O_RDWR)
+        try:
+            _k_mod(fd, True)
+            for komut, indeks, uzunluk, ad in KALIB_BLOKLAR:
+                try:
+                    yuk, tam = _k_oku_blok(fd, komut, indeks, uzunluk)
+                    bloklar.append({
+                        "ad": ad, "komut": komut, "indeks": indeks,
+                        "uzunluk": uzunluk, "veri": yuk.hex(),
+                        "ham_cevap": tam.hex(),
+                    })
+                except OSError as e:
+                    bloklar.append({"ad": ad, "komut": komut, "indeks": indeks,
+                                    "uzunluk": uzunluk, "hata": str(e)})
+            _k_mod(fd, False)
+        finally:
+            os.close(fd)
+    except OSError as e:
+        hata = str(e)
+    finally:
+        if calisiyordu:
+            _t_run(["systemctl", "start", birim])
+
+    if hata and not bloklar:
+        die(f"Cihaza erişilemedi: {hata}")
+
+    tip_kod, kimlik = _t_aygit()
+    return {
+        "bicim": "eta-112-dokunmatik-kalibrasyon/1",
+        "tarih": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+        "panel": {"tip": tip, "usb": kimlik, "aygit": yol},
+        "surucu": _t_kurulu(),
+        "makine": platform.node(),
+        "deneysel": tip != "optical",
+        "bloklar": bloklar,
+    }
+
+
+def _k_yaz_dosya(anlik, yol):
+    with open(yol, "w", encoding="utf-8") as f:
+        json.dump(anlik, f, ensure_ascii=False, indent=2)
+    os.chmod(yol, 0o600)
+
+
+def _k_oku_dosya(yol):
+    try:
+        with open(yol, encoding="utf-8") as f:
+            a = json.load(f)
+    except (OSError, ValueError) as e:
+        die(f"{yol}: okunamadı ({e})")
+    if a.get("bicim", "").split("/")[0] != "eta-112-dokunmatik-kalibrasyon":
+        die(f"{yol}: bu bir kalibrasyon anlık görüntüsü değil.")
+    return a
+
+
+def _k_yazdir(anlik):
+    p = anlik["panel"]
+    print(f"  Panel          : {G(p.get('usb') or '?')}  {D(p['tip'])}  {D(p['aygit'])}")
+    print(f"  Sürücü         : {G(str(anlik.get('surucu')))}")
+    print(f"  Alındığı zaman : {D(anlik['tarih'])}  {D(anlik.get('makine', ''))}")
+    if anlik.get("deneysel"):
+        print(f"  {WARN} {Y('Deneysel: bu panel tipinde komut kimlikleri doğrulanmadı.')}")
+    print()
+    for b in anlik["bloklar"]:
+        basl = f"  {b['ad']:<16} {D('cmd 0x%02x idx %d' % (b['komut'], b['indeks']))}"
+        if "hata" in b:
+            print(f"{basl}  {Y('okunamadı: ' + b['hata'])}")
+            continue
+        ham = bytes.fromhex(b["veri"])
+        print(f"{basl}  {D('%d bayt' % len(ham))}")
+        for i in range(0, len(ham), 16):
+            print(f"      {D('%02x' % i)}  {ham[i:i+16].hex(' ')}")
+        f = _k_floatlar(ham)
+        if f:
+            print(f"      {D('float32:')} " + " ".join(f"{x:.6g}" for x in f[:8])
+                  + (D("  …") if len(f) > 8 else ""))
+
+
+def cmd_touch_kalib_oku(a):
+    if _t_kok() is None:
+        die("Bunun için 'sudo' gerekli.")
+    tip, _ = _t_aygit()
+    if not tip:
+        die("Bilinen bir dokunmatik panel bulunamadı (lsusb).")
+    title("Dokunmatik — kalibrasyon okunuyor")
+    anlik = progress_timed("Cihazdan bloklar okunuyor",
+                           lambda: _k_snapshot(tip, a.dene), est=3.0)
+    _k_yazdir(anlik)
+    yol = a.cikti or os.path.join(
+        TOUCH_YEDEK, time.strftime("kalibrasyon-%Y%m%d-%H%M%S.json"))
+    os.makedirs(os.path.dirname(yol) or ".", exist_ok=True)
+    _k_yaz_dosya(anlik, yol)
+    hr()
+    ok(f"Kaydedildi: {Cy(yol)}")
+    print(f"  {D('Sağlam bir tahtadan da alıp karşılaştırın:')}")
+    print(f"  {D('eta-112.py dokunmatik kalibrasyon karsilastir saglam.json ' + os.path.basename(yol))}")
+    return 0
+
+
+def cmd_touch_kalib_karsilastir(a):
+    if len(a.dosyalar) != 2:
+        die("Kullanım: dokunmatik kalibrasyon karsilastir <A.json> <B.json>")
+    A, B = (_k_oku_dosya(y) for y in a.dosyalar)
+    title("Dokunmatik — kalibrasyon karşılaştırması")
+    for etiket, x, yol in (("A", A, a.dosyalar[0]), ("B", B, a.dosyalar[1])):
+        print(f"  {C.B}{etiket}{C.R}  {Cy(os.path.basename(yol))}  "
+              f"{D(x['panel'].get('usb') or '?')}  {D('sürücü ' + str(x.get('surucu')))}  "
+              f"{D(x['tarih'])}")
+    if A["panel"]["tip"] != B["panel"]["tip"]:
+        warn("Panel tipleri farklı; karşılaştırma anlamlı olmayabilir.")
+    print()
+    ab = {b["ad"]: b for b in B["bloklar"]}
+    farkli = 0
+    for ba in A["bloklar"]:
+        bb = ab.get(ba["ad"])
+        if not bb:
+            print(f"  {ba['ad']:<16} {Y('B tarafında yok')}")
+            continue
+        if "hata" in ba or "hata" in bb:
+            print(f"  {ba['ad']:<16} {Y('bir tarafta okunamamış')}")
+            continue
+        x, y = bytes.fromhex(ba["veri"]), bytes.fromhex(bb["veri"])
+        if x == y:
+            print(f"  {ba['ad']:<16} {G('aynı')}  {D('%d bayt' % len(x))}")
+            continue
+        farkli += 1
+        ofsetler = [i for i in range(min(len(x), len(y))) if x[i] != y[i]]
+        print(f"  {ba['ad']:<16} {R('%d bayt farklı' % len(ofsetler))}")
+        for i in ofsetler[:24]:
+            print(f"      {D('+0x%02x' % i)}  A={Cy('%02x' % x[i])}  B={Y('%02x' % y[i])}")
+        if len(ofsetler) > 24:
+            print(f"      {D('… %d fark daha' % (len(ofsetler) - 24))}")
+        fa, fb = _k_floatlar(x), _k_floatlar(y)
+        for i, (u, v) in enumerate(zip(fa, fb)):
+            if u != v and not (u != u and v != v):     # NaN != NaN'i ele
+                print(f"      {D('float[%d]' % i)}  A={Cy('%.6g' % u)}  B={Y('%.6g' % v)}")
+    hr()
+    if farkli:
+        warn(f"{farkli} blok farklı. Kalibrasyon verisi iki panelde aynı değil.")
+    else:
+        ok("Tüm bloklar aynı. Fark kalibrasyon verisinde değil.")
+    return 0
+
+
+def cmd_touch_kalib_yaz(a):
+    if _t_kok() is None:
+        die("Bunun için 'sudo' gerekli.")
+    if not a.dosyalar:
+        die("Kullanım: dokunmatik kalibrasyon yaz <anlik.json> --onayliyorum")
+    anlik = _k_oku_dosya(a.dosyalar[0])
+    tip, kimlik = _t_aygit()
+    if not tip:
+        die("Bilinen bir dokunmatik panel bulunamadı (lsusb).")
+    yol = _k_aygit_yolu(tip)
+    if not yol:
+        die("Sürücünün aygıt düğümü yok; yazılamaz.  'dokunmatik durum' ile bakın.")
+    if anlik["panel"]["tip"] != tip:
+        die(f"Anlık görüntü {anlik['panel']['tip']} panelden alınmış, hedef {tip}. "
+            "Farklı panel tipine yazılamaz.")
+    if tip != "optical" and not a.dene:
+        die("OTD (2621) panellerde komut kimlikleri doğrulanmadı; yazma varsayılan "
+            "olarak kapalı.\n    Ne yaptığınızı biliyorsanız:  --dene --onayliyorum")
+
+    title("Dokunmatik — kalibrasyon cihaza yazılacak")
+    print(f"  Kaynak dosya   : {Cy(a.dosyalar[0])}")
+    print(f"  Alındığı panel : {D(anlik['panel'].get('usb') or '?')}  {D(anlik['tarih'])}")
+    print(f"  Hedef panel    : {G(kimlik)}  {D(tip)}")
+    print()
+    print(f"  {ERR} {R('YAZMA KOMUTU DOĞRULANMADI.')}")
+    print(f"     {Y('Okuma protokolü ikiliden birebir sökülerek çıkarıldı ve kesindir.')}")
+    print(f"     {Y('Yazma için aynı komut/indeks çiftlerinin set paketiyle kullanıldığı')}")
+    print(f"     {Y('VARSAYILIYOR — üretici aracının bunu yaptığı gözlemlenmedi. Yanlış')}")
+    print(f"     {Y('komut panelin kalibrasyonunu kalıcı olarak bozabilir.')}")
+    print()
+    if anlik["panel"].get("usb") != kimlik:
+        print(f"  {WARN} {Y('Bu anlık görüntü başka bir panelden alınmış.')}")
+    if not a.onayliyorum:
+        die("Devam etmek için açıkça onaylayın:  --onayliyorum")
+
+    print(f"  {D('Önce mevcut durum yedekleniyor...')}")
+    yedek = os.path.join(TOUCH_YEDEK, time.strftime("kalibrasyon-yazmadan-once-%Y%m%d-%H%M%S.json"))
+    os.makedirs(TOUCH_YEDEK, exist_ok=True)
+    _k_yaz_dosya(_k_snapshot(tip, deneysel=True), yedek)
+    ok(f"Yedek: {Cy(yedek)}")
+    print()
+    if ask(f"  {R('Yazılsın mı?')} Geri almak için yukarıdaki yedeği kullanın "
+           "[yaz/iptal]: ").strip().lower() != "yaz":
+        warn("İptal edildi; hiçbir şey yazılmadı.")
+        return 1
+
+    birim, calisiyordu = _k_servis_durdur(tip)
+    yazilan = 0
+    try:
+        fd = os.open(yol, os.O_RDWR)
+        try:
+            _k_mod(fd, True)
+            for b in anlik["bloklar"]:
+                if "hata" in b:
+                    warn(f"{b['ad']}: kaynak dosyada eksik — atlandı.")
+                    continue
+                try:
+                    _k_yaz_blok(fd, b["komut"], b["indeks"], bytes.fromhex(b["veri"]))
+                    yazilan += 1
+                    ok(f"{b['ad']} yazıldı  {D('cmd 0x%02x idx %d' % (b['komut'], b['indeks']))}")
+                except (OSError, ValueError) as e:
+                    err(f"{b['ad']}: yazılamadı — {e}")
+            _k_mod(fd, False)
+        finally:
+            os.close(fd)
+    finally:
+        if calisiyordu:
+            _t_run(["systemctl", "start", birim])
+
+    hr()
+    if not yazilan:
+        err("Hiçbir blok yazılamadı.")
+        return 1
+    ok(f"{yazilan} blok yazıldı.")
+    print(f"  {D('Doğrulamak için:  eta-112.py dokunmatik kalibrasyon oku')}")
+    print(f"  {D('Geri almak için:  eta-112.py dokunmatik kalibrasyon yaz ' + yedek + ' --onayliyorum')}")
+    return 0
+
+
+def cmd_touch_kalib_ham(a):
+    """Tek bir komut/indeks çiftini elle sorgula — protokol keşfi için."""
+    if _t_kok() is None:
+        die("Bunun için 'sudo' gerekli.")
+    tip, _ = _t_aygit()
+    if not tip:
+        die("Bilinen bir dokunmatik panel bulunamadı (lsusb).")
+    yol = _k_aygit_yolu(tip)
+    if not yol:
+        die("Sürücünün aygıt düğümü yok.")
+    birim, calisiyordu = _k_servis_durdur(tip)
+    try:
+        fd = os.open(yol, os.O_RDWR)
+        try:
+            _k_mod(fd, True)
+            yuk, tam = _k_oku_blok(fd, a.komut, a.indeks, a.uzunluk)
+            _k_mod(fd, False)
+        finally:
+            os.close(fd)
+    except OSError as e:
+        if calisiyordu:
+            _t_run(["systemctl", "start", birim])
+        die(f"Sorgu başarısız: {e}")
+    if calisiyordu:
+        _t_run(["systemctl", "start", birim])
+    title(f"Ham sorgu — cmd 0x{a.komut:02x} indeks {a.indeks}")
+    print(f"  {D('tam 64 baytlık cevap:')}")
+    for i in range(0, 64, 16):
+        print(f"      {D('%02x' % i)}  {tam[i:i+16].hex(' ')}")
+    print(f"  {D('yük (ofset 5, %d bayt):' % a.uzunluk)}  {Cy(yuk.hex(' '))}")
+    f = _k_floatlar(yuk)
+    if f:
+        print(f"  {D('float32:')} " + " ".join(f"{x:.6g}" for x in f))
+    return 0
+
+
+def etatouch_main(argv):
+    cmd = (argv[0] if argv else "durum").lower()
+    if cmd in ("--help", "-h", "help", "yardim"):
+        print(B("eta-112.py dokunmatik") + " — ETAP akıllı tahta dokunmatik sürücü aracı")
+        print()
+        print("  dokunmatik durum                 panel, kurulu sürüm, servis ve girdi aygıtı")
+        print("  dokunmatik liste                 arşivdeki sürümler ve deneme sırası")
+        print("  dokunmatik dene                  sürümleri sırayla dene, düzeleni kalıcılaştır")
+        print("  dokunmatik kalici <SÜRÜM>        bir sürümü kur ve apt'ye sabitle")
+        print("  dokunmatik serbest               sabitlemeyi kaldır")
+        print("  dokunmatik geri                  başlangıç durumuna dön")
+        print()
+        print("  Kalibrasyon — cihazın EEPROM'undaki blokları doğrudan okur/yazar:")
+        print("  dokunmatik kalibrasyon oku            blokları oku ve dosyaya kaydet")
+        print("  dokunmatik kalibrasyon karsilastir A B   iki anlık görüntüyü karşılaştır")
+        print("  dokunmatik kalibrasyon yaz A.json     anlık görüntüyü cihaza geri yaz")
+        print("  dokunmatik kalibrasyon ham            tek komut/indeks sorgula")
+        print()
+        print("  Seçenekler:")
+        print("    --kademe 1   yalnız sunucu ikilisini değiştir (varsayılan, hızlı)")
+        print("    --kademe 2   .deb'i tam kur (modül + sunucu; DKMS derler, yavaş)")
+        print("    --surum X    sıradan bağımsız tek bir sürümü dene")
+        print("    --yerel YOL  internet yerine yerel dokunmatik/ dizininden oku")
+        print("    --zorla      panel algılanamasa da devam et")
+        print("    --cikti YOL  kalibrasyon anlık görüntüsünü buraya yaz")
+        print("    --dene       OTD (2621) panelde doğrulanmamış komut kümesini dene")
+        print("    --onayliyorum   kalibrasyon yazmayı açıkça onayla (gerekli)")
+        print("    --cmd/--indeks/--uzunluk   'kalibrasyon ham' için sorgu alanları")
+        return 0
+
+    class _A:
+        kademe = 1
+        surum = None
+        yerel = None
+        zorla = False
+        cikti = None
+        dene = False
+        onayliyorum = False
+        komut = 0x30
+        indeks = 0
+        uzunluk = 0x3a
+        dosyalar = ()
+    a = _A()
+    kalan = []
+    it = iter(argv[1:])
+    for p in it:
+        if p == "--kademe":
+            a.kademe = int(next(it, "1"))
+        elif p == "--surum":
+            a.surum = next(it, None)
+        elif p == "--yerel":
+            a.yerel = next(it, None)
+        elif p == "--zorla":
+            a.zorla = True
+        elif p == "--cikti":
+            a.cikti = next(it, None)
+        elif p == "--dene":
+            a.dene = True
+        elif p == "--onayliyorum":
+            a.onayliyorum = True
+        elif p == "--cmd":
+            a.komut = int(next(it, "0x30"), 0)
+        elif p == "--indeks":
+            a.indeks = int(next(it, "0"), 0)
+        elif p == "--uzunluk":
+            a.uzunluk = int(next(it, "0x3a"), 0)
+        else:
+            kalan.append(p)
+    if a.kademe not in (1, 2):
+        die("--kademe yalnız 1 veya 2 olabilir.")
+    if not 0 <= a.uzunluk <= 0x3b:
+        die("--uzunluk 0 ile 59 arasında olmalı (64 baytlık rapor, yük ofset 5'ten başlar).")
+
+    if cmd in ("durum", "status", "bilgi"):
+        return cmd_touch_durum(a) or 0
+    if cmd in ("liste", "list", "surumler"):
+        return cmd_touch_liste(a) or 0
+    if cmd in ("dene", "try", "sihirbaz"):
+        return cmd_touch_dene(a) or 0
+    if cmd in ("kalici", "kalıcı", "pin", "sabitle"):
+        a.surum = a.surum or (kalan[0] if kalan else None)
+        if not a.surum:
+            die("Kullanım: dokunmatik kalici <SÜRÜM>")
+        return cmd_touch_kalici(a) or 0
+    if cmd in ("serbest", "unhold", "cozs", "coz"):
+        return cmd_touch_serbest(a) or 0
+    if cmd in ("geri", "restore", "geridon"):
+        return cmd_touch_geri(a) or 0
+    if cmd in ("kalibrasyon", "kalib", "eeprom"):
+        alt = (kalan[0] if kalan else "oku").lower()
+        a.dosyalar = tuple(kalan[1:])
+        if alt in ("oku", "dump", "kaydet"):
+            return cmd_touch_kalib_oku(a) or 0
+        if alt in ("karsilastir", "karşılaştır", "diff", "fark"):
+            return cmd_touch_kalib_karsilastir(a) or 0
+        if alt in ("yaz", "geriyukle", "restore"):
+            return cmd_touch_kalib_yaz(a) or 0
+        if alt in ("ham", "raw", "sorgu"):
+            return cmd_touch_kalib_ham(a) or 0
+        die("Bilinmeyen kalibrasyon komutu: %s   (oku|karsilastir|yaz|ham)" % alt)
+    die("Bilinmeyen dokunmatik komutu: %s   "
+        "(durum|liste|dene|kalici|serbest|geri|kalibrasyon)" % cmd)
+
+
 # ===================== BİRLEŞİK DAĞITICI =====================
 def _unified_usage():
     rule=D("─"*60)
@@ -2051,7 +3191,7 @@ def _unified_usage():
     print()
     print(rule)
     print(B("  KULLANIM"))
-    print(row("", "", "etkileşimli menü (kullanıcı / BIOS / MAC)"))
+    print(row("", "", "etkileşimli menü (kullanıcı / BIOS / MAC / wkey / dokunmatik)"))
     print()
     print(Cy("  Komutlar")+"   "+D("ayrıntılı yardım: ")+G("eta-112.py <komut> -h"))
     print(row("kullanici [...]", G("kullanici")+" "+D("[...]"), "OS kullanıcı parolasını sıfırla"))
@@ -2063,89 +3203,403 @@ def _unified_usage():
     print(row("wkey <komut>", G("wkey")+" "+D("<komut>"), "Windows ürün anahtarı (MSDM) oku / değiştir"))
     sub("read · set <ANAHTAR> · --json")
     print()
+    print(row("dokunmatik <komut>", G("dokunmatik")+" "+D("<komut>"), "dokunmatik sürücü sürümünü dene / sabitle"))
+    sub("durum · liste · dene · kalici <SÜRÜM> · serbest · geri")
+    print()
     print(row("--help", Cy("--help"), "bu yardım"))
     print(rule)
 
 
-def _bios_menu():
+# ------------------------------------------------------------------ pull-down menü
+# Ok tuslariyla gezilen renkli menu. Yalnizca ETKILESIMLI oturumda devreye girer;
+# borulanmis/yakalanmis cikti ya da tty yoksa eski numarali menuye duser. Komut
+# satiri arayuzu (bios/kullanici/mac/wkey/dokunmatik + --json) bundan etkilenmez:
+# menu yalnizca hic argumansiz calistirildiginda gosterilir.
+#
+# Tasarim kurali: kullanici acikca istemeden menuden cikilmaz.
+#   * Alt menulerde Esc/q/0 -> ust menuye doner (cikis degil).
+#   * Ana menude Esc/q/0/Ctrl-C -> imleci "Cikis" uzerine tasir, cikmaz.
+#   * Bir eylem hata verip die() cagirsa bile menu kapanmaz; hata gosterilir,
+#     tusa basilinca menuye donulur.
+
+import contextlib
+
+_MENU_IPUCU = "↑/↓ gez · Enter seç · 1-9 doğrudan · Esc geri"
+_MENU_YOL = []   # bulunulan menü patikası (breadcrumb)
+
+
+def _tty_fd():
+    try:
+        fd = _TTY.fileno()
+    except (AttributeError, ValueError, OSError):
+        return -1
+    return fd if os.isatty(fd) else -1
+
+
+def _menu_etkilesimli():
+    """Pull-down menü çizilebilir mi?"""
+    if os.environ.get("ETA112_BASIT_MENU"):
+        return False
+    if not sys.stdout.isatty():
+        return False
+    if os.environ.get("TERM", "") in ("", "dumb"):
+        return False
+    return _tty_fd() >= 0
+
+
+def _tus_oku(fd):
+    """Tek tuş veya kaçış dizisi oku. -> 'yukari'|'asagi'|'bas'|'son'|'giris'|
+    'esc'|'ctrl-c'|tek karakter|None"""
+    import select
+    try:
+        b = os.read(fd, 1)
+    except OSError:
+        return None
+    if not b:
+        return None
+    if b == b"\x03":
+        return "ctrl-c"
+    if b in (b"\r", b"\n"):
+        return "giris"
+    if b == b"\x1b":
+        r, _, _ = select.select([fd], [], [], 0.05)
+        if not r:
+            return "esc"
+        b2 = os.read(fd, 1)
+        if b2 not in (b"[", b"O"):
+            return "esc"
+        b3 = os.read(fd, 1)
+        if b3 == b"":
+            return "esc"
+        if b3 in b"0123456789":          # ör. ESC [ 5 ~  (page up)
+            while True:
+                b4 = os.read(fd, 1)
+                if b4 in (b"~", b""):
+                    break
+            return {b"5": "bas", b"6": "son"}.get(b3, "esc")
+        return {b"A": "yukari", b"B": "asagi", b"H": "bas", b"F": "son",
+                b"C": "giris", b"D": "esc"}.get(b3, "esc")
+    try:
+        return b.decode("utf-8", "replace")
+    except UnicodeDecodeError:
+        return None
+
+
+def _ham_tty(fd):
+    """Terminali tuş-tuş okuma kipine alır; çıkarken eski haline döndürür."""
+    import contextlib
+    import termios
+    import tty
+
+    @contextlib.contextmanager
+    def _kip():
+        eski = termios.tcgetattr(fd)
+        try:
+            tty.setcbreak(fd)
+            sys.stdout.write("\033[?25l")      # imleci gizle
+            sys.stdout.flush()
+            yield
+        finally:
+            sys.stdout.write("\033[?25h")
+            sys.stdout.flush()
+            termios.tcsetattr(fd, termios.TCSADRAIN, eski)
+    return _kip()
+
+
+def _menu_yolu(baslik):
+    """Bulunulan konumun tam patikası:  ETA-112 > BIOS EEPROM > MAC adresi"""
+    return " > ".join(_MENU_YOL + [baslik])
+
+
+@contextlib.contextmanager
+def _yol_ekle(*adlar):
+    """Alt menü/işlem süresince patikaya basamak ekler."""
+    _MENU_YOL.extend(a for a in adlar if a)
+    try:
+        yield
+    finally:
+        del _MENU_YOL[len(_MENU_YOL) - len([a for a in adlar if a]):]
+
+
+def _menu_kapasite():
+    """Ekrana kaç öğe sığar (başlık/ayraç/ipucu payı düşülmüş).
+
+    Pencere boyutu bildirmeyen terminaller 0 döndürebiliyor; o durumda listeyi
+    boş yere kırpmamak için 24 satır varsayılır."""
+    satir = 0
+    for fd in (_tty_fd(), 1):
+        try:
+            satir = os.get_terminal_size(fd).lines
+        except (OSError, ValueError):
+            satir = 0
+        if satir >= 10:
+            break
+    if satir < 10:
+        satir = 24
+    return max(3, satir - 8)
+
+
+def _menu_ciz(baslik, ogeler, secili, ana):
+    """Menü bloğunu satır listesi olarak üretir."""
+    n = len(ogeler)
+    kap = _menu_kapasite()
+    if n <= kap:
+        bas, bit = 0, n
+    else:                               # uzun liste: seçili öğenin çevresini göster
+        bas = max(0, min(secili - kap // 2, n - kap))
+        bit = bas + kap
+    # Açıklaması olan öğe yoksa hizalama sütunu da yok — etiketler yalın kalsın.
+    aciklamali = any(a for _, a in ogeler)
+    genislik = max((len(e) for e, _ in ogeler), default=0) if aciklamali else 0
+    nog = 2 if n > 9 else 1
+    satirlar = ["", f"  {C.CY}{C.B}{_menu_yolu(baslik)}{C.R}", C.DIM + "─" * 60 + C.R]
+    if bas > 0:
+        satirlar.append(f"    {C.DIM}↑ {bas} öğe daha{C.R}")
+    for i in range(bas, bit):
+        etiket, aciklama = ogeler[i]
+        no = " " * nog if i == n - 1 else str(i + 1).rjust(nog)
+        govde = f"{no} {etiket.ljust(genislik)}  {aciklama}".rstrip()
+        if i == secili:
+            satirlar.append(f"  {C.CY}▸{C.R}{C.INV} {govde} {C.R}")
+        else:
+            satirlar.append(f"    {C.DIM}{govde}{C.R}")
+    if bit < n:
+        satirlar.append(f"    {C.DIM}↓ {n - bit} öğe daha{C.R}")
+    satirlar.append(C.DIM + "─" * 60 + C.R)
+    ipucu = _MENU_IPUCU if not ana else _MENU_IPUCU.replace("Esc geri", "Esc → Çıkış")
+    satirlar.append(f"  {C.DIM}{ipucu}{C.R}")
+    return satirlar
+
+
+def _secim_basit(baslik, ogeler, ana):
+    """Etkileşimli olmayan ortam için eski numaralı menü."""
     print()
-    print(C.B + "  BIOS parolası" + C.R)
-    print(C.DIM + "  1) Parolaları oku" + C.R)
-    print(C.DIM + "  2) Parola ayarla" + C.R)
-    print(C.DIM + "  3) Parola temizle" + C.R)
-    print(C.DIM + "  4) Model / destek bilgisi" + C.R)
-    print(C.DIM + "  0) Geri" + C.R)
+    print(C.B + "  " + _menu_yolu(baslik) + C.R)
+    for i, (etiket, aciklama) in enumerate(ogeler):
+        no = 0 if i == len(ogeler) - 1 else i + 1
+        ek = f" ({aciklama})" if aciklama else ""
+        print(C.DIM + f"  {no}) {etiket}{ek}" + C.R)
     hr()
     s = ask("  Seçim: ").strip()
-    if s == "1":
-        return etabios_main(["read"]) or 0
-    if s == "2":
-        return etabios_main(["set"]) or 0
-    if s == "3":
-        slot = ask("  Hangi parola silinsin? [all/yonetici/kullanici]: ").strip() or "all"
-        if slot not in ("all", "yonetici", "kullanici"):
-            slot = "all"
-        return etabios_main(["clear", slot]) or 0
-    if s == "4":
-        return etabios_main(["info"]) or 0
-    return 0
+    if s in ("", "0"):
+        return len(ogeler) - 1
+    if s.isdigit() and 1 <= int(s) <= len(ogeler) - 1:
+        return int(s) - 1
+    return None
+
+
+def _secim(baslik, ogeler, secili=0, ana=False):
+    """Menüyü göster, seçilen öğenin indeksini döndür.
+
+    Son öğe her zaman 'Geri'/'Çıkış' sayılır. Esc/q/0:
+      * alt menüde  -> son öğe seçilir (üst menüye dön)
+      * ana menüde  -> imleç son öğeye taşınır, çıkmak için Enter gerekir
+    """
+    if not _menu_etkilesimli():
+        s = _secim_basit(baslik, ogeler, ana)
+        return len(ogeler) - 1 if s is None and not ana else s
+    fd = _tty_fd()
+    son = len(ogeler) - 1
+    secili = max(0, min(secili, son))
+    cizilen = 0
+    sonuc = None
+    with _ham_tty(fd):
+        while sonuc is None:
+            satirlar = _menu_ciz(baslik, ogeler, secili, ana)
+            if cizilen:
+                sys.stdout.write(f"\033[{cizilen}A")
+            for s in satirlar:
+                sys.stdout.write("\r\033[2K" + s + "\n")
+            cizilen = len(satirlar)
+            sys.stdout.write("\033[J")      # blok kısaldıysa altta artık kalmasın
+            sys.stdout.flush()
+
+            t = _tus_oku(fd)
+            if t is None:
+                sonuc = son
+            elif t == "yukari":
+                secili = son if secili == 0 else secili - 1
+            elif t == "asagi":
+                secili = 0 if secili == son else secili + 1
+            elif t == "bas":
+                secili = 0
+            elif t == "son":
+                secili = son
+            elif t == "giris":
+                sonuc = secili
+            elif t in ("esc", "ctrl-c", "q", "Q", "0"):
+                if not ana:
+                    sonuc = son
+                else:
+                    secili = son      # ana menüde çıkmak için ayrıca Enter gerekir
+            elif t.isdigit() and 1 <= int(t) <= son:
+                sonuc = int(t) - 1
+        # Seçim yapıldı: menü bloğunu ekrandan sil. Alt menü ya da işlem çıktısı
+        # üstte asılı kalan bir menünün altına değil, tam onun yerine çizilsin.
+        sys.stdout.write(f"\033[{cizilen}A\033[J")
+        sys.stdout.flush()
+    return sonuc
+
+
+def _devam_bekle():
+    print()
+    if not _menu_etkilesimli():
+        ask(C.DIM + "  Menüye dönmek için Enter'a basın... " + C.R)
+        return
+    sys.stdout.write(C.DIM + "  Menüye dönmek için bir tuşa basın... " + C.R)
+    sys.stdout.flush()
+    fd = _tty_fd()
+    with _ham_tty(fd):
+        _tus_oku(fd)
+    sys.stdout.write("\r\033[2K")      # istem satırını temizle
+    sys.stdout.flush()
+
+
+def _eylem_calistir(fn):
+    """Menüden çağrılan işi yürütür; hiçbir hata menüyü kapatmaz.
+
+    die() normalde süreci bitirir ve bağlamaları atexit temizler. Menüde SystemExit
+    yakalandığı için süreç yaşamaya devam eder; bu yüzden temizliği burada açıkça
+    yapıyoruz, yoksa yarıda kalan bir 'kullanıcı parolası' akışından kalan
+    bağlamalar bir sonraki denemeyi bozar."""
+    print()
+    kod = 0
+    try:
+        kod = fn() or 0
+    except SystemExit as e:
+        kod = e.code if isinstance(e.code, int) else 1
+    except KeyboardInterrupt:
+        print()
+        warn("İşlem iptal edildi.")
+        kod = 130
+    except EOFError:
+        print()
+        warn("Girdi alınamadı.")
+        kod = 1
+    except Exception as e:          # menü hiçbir koşulda çökmesin
+        err(f"Beklenmeyen hata: {type(e).__name__}: {e}")
+        kod = 1
+    finally:
+        try:
+            _cleanup()
+        except Exception:
+            pass
+    if _menu_etkilesimli():
+        _devam_bekle()
+    return kod
+
+
+def _menu_dongusu(baslik, ogeler, ana=False):
+    """Menüyü seçim yapılana dek döndürür.
+
+    ogeler: (etiket, açıklama, eylem|None[, alt_menu_mu]) dizileri.
+    Son öğe Geri/Çıkış sayılır (eylem None). alt_menu_mu=True olan öğelerden
+    dönüşte 'bir tuşa basın' beklemesi yapılmaz.
+
+    Döngü YALNIZCA etkileşimli kipte kurulur. Etkileşimsiz kipte (borulanmış
+    girdi, tty yok) menü eskisi gibi tek seferliktir; boru ile numara besleyen
+    mevcut script'ler aynı şekilde çalışmaya devam etsin diye."""
+    secili = 0
+    dongu = _menu_etkilesimli()
+    goster = [(o[0], o[1]) for o in ogeler]
+    while True:
+        try:
+            secim = _secim(baslik, goster, secili, ana=ana)
+        except KeyboardInterrupt:
+            continue                # ana menüde Ctrl-C çıkarmaz
+        if secim is None:
+            if not dongu:
+                return 0            # eski davranış: geçersiz girdi menüyü kapatır
+            continue
+        secili = secim
+        oge = ogeler[secim]
+        eylem = oge[2]
+        if eylem is None:
+            return 0
+        if len(oge) > 3 and oge[3]:
+            with _yol_ekle(baslik):          # alt menü kendi adını leaf olarak yazar
+                sonuc = eylem()
+        else:
+            with _yol_ekle(baslik, oge[0]):  # işlem: patikaya öğe adı da eklenir
+                sonuc = _eylem_calistir(eylem)
+        if not dongu:
+            return sonuc or 0
+
+
+def _bios_menu():
+    return _menu_dongusu("BIOS parolası", [
+        ("Parolaları oku", "", lambda: etabios_main(["read"])),
+        ("Parola ayarla", "", lambda: etabios_main(["set"])),
+        ("Parola temizle", "", _bios_temizle),
+        ("Model / destek bilgisi", "", lambda: etabios_main(["info"])),
+        ("Geri", "", None),
+    ])
+
+
+def _bios_temizle():
+    slot = ask("  Hangi parola silinsin? [all/yonetici/kullanici]: ").strip() or "all"
+    if slot not in ("all", "yonetici", "kullanici"):
+        slot = "all"
+    return etabios_main(["clear", slot])
 
 
 def _mac_menu():
-    print()
-    print(C.B + "  MAC adresi" + C.R)
-    print(C.DIM + "  1) MAC oku (+ Faz OUI durumu)" + C.R)
-    print(C.DIM + "  2) Bir MAC'i doğrula (Faz'a ait mi?)" + C.R)
-    print(C.DIM + "  3) MAC değiştir (kalıcı / OS-bağımsız)" + C.R)
-    print(C.DIM + "  0) Geri" + C.R)
-    hr()
-    s = ask("  Seçim: ").strip()
-    if s == "1":
-        return etamac_main(["read"]) or 0
-    if s == "2":
-        m = ask("  Doğrulanacak MAC: ").strip()
-        return etamac_main(["check", m]) or 0
-    if s == "3":
-        m = ask("  Yeni MAC: ").strip()
-        return etamac_main(["set", m]) or 0
-    return 0
+    return _menu_dongusu("MAC adresi", [
+        ("MAC oku", "", lambda: etamac_main(["read"])),
+        ("MAC değiştir", "",
+         lambda: etamac_main(["set", ask("  Yeni MAC: ").strip()])),
+        ("Bir MAC'i doğrula", "",
+         lambda: etamac_main(["check", ask("  Doğrulanacak MAC: ").strip()])),
+        ("Geri", "", None),
+    ])
 
 
 def _wkey_menu():
-    print()
-    print(C.B + "  Windows ürün anahtarı" + C.R)
-    print(C.DIM + "  1) Anahtarı oku (MSDM)" + C.R)
-    print(C.DIM + "  2) Anahtarı değiştir (flash MSDM)" + C.R)
-    print(C.DIM + "  0) Geri" + C.R)
-    hr()
-    s = ask("  Seçim: ").strip()
-    if s == "1":
-        return etawkey_main(["read"]) or 0
-    if s == "2":
-        k = ask("  Yeni anahtar (XXXXX-XXXXX-XXXXX-XXXXX-XXXXX): ").strip()
-        return etawkey_main(["set", k]) or 0
-    return 0
+    return _menu_dongusu("Windows ürün anahtarı", [
+        ("Anahtarı oku", "", lambda: etawkey_main(["read"])),
+        ("Anahtarı değiştir", "",
+         lambda: etawkey_main(["set", ask(
+             "  Yeni anahtar (XXXXX-XXXXX-XXXXX-XXXXX-XXXXX): ").strip()])),
+        ("Geri", "", None),
+    ])
+
+
+def _touch_kalib_karsilastir():
+    x = ask("  Birinci kayıt (sağlam tahta): ").strip()
+    y = ask("  İkinci kayıt (sorunlu tahta): ").strip()
+    return etatouch_main(["kalibrasyon", "karsilastir", x, y])
+
+
+def _touch_menu():
+    return _menu_dongusu("Dokunmatik sürücü", [
+        ("Durum", "", lambda: etatouch_main(["durum"])),
+        ("Sürümleri listele", "", lambda: etatouch_main(["liste"])),
+        ("Sürüm dene — hızlı", "", lambda: etatouch_main(["dene", "--kademe", "1"])),
+        ("Sürüm dene — tam", "", lambda: etatouch_main(["dene", "--kademe", "2"])),
+        ("Kalibrasyonu oku", "", lambda: etatouch_main(["kalibrasyon", "oku"])),
+        ("Kalibrasyon karşılaştır", "", _touch_kalib_karsilastir),
+        ("Başlangıç durumuna dön", "", lambda: etatouch_main(["geri"])),
+        ("Sabitlemeyi kaldır", "", lambda: etatouch_main(["serbest"])),
+        ("Geri", "", None),
+    ])
+
+
+def _bios_eeprom_menu():
+    return _menu_dongusu("BIOS EEPROM", [
+        ("BIOS parolası", "", _bios_menu, True),
+        ("MAC adresi", "", _mac_menu, True),
+        ("Windows ürün anahtarı", "", _wkey_menu, True),
+        ("Geri", "", None),
+    ])
 
 
 def _menu():
-    print()
-    print(C.B + "  ETA-112 — Birleşik Parola Aracı" + C.R)
-    print(C.DIM + "  1) İşletim sistemi kullanıcı parolası (canlı/çalışan disk)" + C.R)
-    print(C.DIM + "  2) BIOS parolası (oku / ayarla / temizle)" + C.R)
-    print(C.DIM + "  3) MAC adresi (oku / doğrula / değiştir)" + C.R)
-    print(C.DIM + "  4) Windows ürün anahtarı (oku / değiştir)" + C.R)
-    print(C.DIM + "  0) Çıkış" + C.R)
-    hr()
-    s = ask("  Seçim [1/2/3/4/0]: ").strip()
-    if s == "1":
-        return kps_main([]) or 0
-    if s == "2":
-        return _bios_menu()
-    if s == "3":
-        return _mac_menu()
-    if s == "4":
-        return _wkey_menu()
-    return 0
+    return _menu_dongusu("ETA-112", [
+        ("Kullanıcı hesapları", "", lambda: kps_main([])),
+        ("BIOS EEPROM", "", _bios_eeprom_menu, True),
+        ("Dokunmatik sürücü", "", _touch_menu, True),
+        ("Çıkış", "", None),
+    ], ana=True)
 
 
 def main():
@@ -2160,6 +3614,8 @@ def main():
         return etamac_main(argv[1:]) or 0
     if argv and argv[0] in ("wkey", "windows", "winkey", "seri"):
         return etawkey_main(argv[1:]) or 0
+    if argv and argv[0] in ("dokunmatik", "touch", "tahta", "ekran"):
+        return etatouch_main(argv[1:]) or 0
     if argv:
         if argv[0].startswith("-"):     # çıplak bayraklar -> kullanıcı modu (geriye uyum)
             return kps_main(argv) or 0
@@ -2189,7 +3645,7 @@ fi
 # kesinlikle root gerektirir. Python tarafı da ayrıca kontrol eder.
 NEED_ROOT=1
 for a in "$@"; do
-  case "$a" in --list|--liste|--dry-run|--kuru|--help|-h|info|read|--json|calibrate|mac|check|oku|dogrula|kontrol) NEED_ROOT=0 ;; esac
+  case "$a" in --list|--liste|--dry-run|--kuru|--help|-h|info|read|--json|calibrate|mac|check|oku|dogrula|kontrol|durum|liste|karsilastir) NEED_ROOT=0 ;; esac
 done
 if [ "$NEED_ROOT" = "1" ] && [ "$(id -u)" -ne 0 ]; then
   die "root gerekli. Şöyle çalıştırın:  curl -fsSL <URL> | sudo bash"

@@ -1,0 +1,618 @@
+{
+  "paket": "eta-touchdrv",
+  "mimari": "amd64",
+  "aciklama": "Pardus ETAP akilli tahta dokunmatik surucu paketleri. Paket; kernel modulu kaynagini (DKMS), kullanici uzayi sunucu ikilisini, systemd birimini ve udev kurallarini birlikte tasir. Sistemde bunlarin disinda dokunmatige ait yapilandirma dosyasi yoktur; kalibrasyon verisi cihazin EEPROM'unda (ProductKey) tutulur.",
+  "deneme_sirasi": [
+    "0.5.1",
+    "0.4.0",
+    "0.4.0~beta1",
+    "0.3.6~tbt1",
+    "0.3.5",
+    "0.3.2",
+    "0.3.0",
+    "0.2.0",
+    "0.1.8"
+  ],
+  "surumler": [
+    {
+      "surum": "0.1.8",
+      "sinif": "resmi",
+      "koken": "yerel-arsiv",
+      "dosya": "paketler/eta-touchdrv_0.1.8_amd64.deb",
+      "boyut": 100334,
+      "sha256": "8bb36c763aa921f8db6135a4b860acb11679691129052ae196afbcfec52ac86d",
+      "tarih": "Mon, 30 Dec 2019 19:05:50 +0300",
+      "strip_edilmis": true,
+      "upstream_blob": {
+        "otd_sunucu": "2b5861ca6266fe38",
+        "otd_modul": "-",
+        "optik_sunucu": "-",
+        "optik_modul": "-"
+      },
+      "sunucu": [
+        "OtdTouchServer",
+        "opticServer"
+      ],
+      "modul_kaynagi": [
+        "OtdTouchDriver.c",
+        "optictouch.c"
+      ],
+      "servis": [
+        "eta-touchdrv.service"
+      ],
+      "baslatici": [
+        "touchdrv_install"
+      ],
+      "udev_sha256": "d9207b9eaf0172b9",
+      "not": "ETAP 19 oncesi; kernel modulu OtdTouchDriver.c, optik tarafta opticServer. Guncel cekirdekte DKMS derlemesi buyuk ihtimalle basarisiz olur.",
+      "kalibrasyon_esdegeri": [],
+      "sunucu_nesli": "A",
+      "modul_nesli": "yok",
+      "guncel_cekirdekte_derlenir": false,
+      "kademe1_uyumlu_modul": null
+    },
+    {
+      "surum": "0.2.0",
+      "sinif": "resmi",
+      "koken": "git-yeniden-paketleme",
+      "dosya": "paketler/eta-touchdrv_0.2.0_amd64.deb",
+      "boyut": 211676,
+      "sha256": "3f369eca99c327039edcdc4bb75e27775fb4e0d0e56fc24c64d1a836160f656f",
+      "tarih": "Thu, 18 Jun 2020 12:09:10 +0300",
+      "strip_edilmis": false,
+      "upstream_blob": {
+        "otd_sunucu": "d3bd5abd382c9447",
+        "otd_modul": "844eca6074da0f7b",
+        "optik_sunucu": "98f8ee35b8cd7241",
+        "optik_modul": "8e89e58e152799a4"
+      },
+      "sunucu": [
+        "OpticalService",
+        "OtdTouchServer"
+      ],
+      "modul_kaynagi": [
+        "OpticalDrv.c",
+        "OtdDrv.c"
+      ],
+      "servis": [
+        "eta-touchdrv.service"
+      ],
+      "baslatici": [
+        "touchdrv_install"
+      ],
+      "udev_sha256": "d9207b9eaf0172b9",
+      "not": "OtdDrv.c'ye gecis. ETAP 19 icin guncellenen ilk surum.",
+      "kalibrasyon_esdegeri": [],
+      "sunucu_nesli": "B",
+      "modul_nesli": "M1",
+      "guncel_cekirdekte_derlenir": false,
+      "kademe1_uyumlu_modul": "844eca6074da0f7b"
+    },
+    {
+      "surum": "0.3.0",
+      "sinif": "resmi",
+      "koken": "git-yeniden-paketleme",
+      "dosya": "paketler/eta-touchdrv_0.3.0_amd64.deb",
+      "boyut": 211836,
+      "sha256": "71f8b522b9bea570368f95d025c0a813a52c1a27530cb2d5b0149b79959694f5",
+      "tarih": "Thu, 20 Oct 2022 16:40:48 +0300",
+      "strip_edilmis": false,
+      "upstream_blob": {
+        "otd_sunucu": "d3bd5abd382c9447",
+        "otd_modul": "fa24c98856490244",
+        "optik_sunucu": "98f8ee35b8cd7241",
+        "optik_modul": "2d362ae9da92de57"
+      },
+      "sunucu": [
+        "OpticalService",
+        "OtdTouchServer"
+      ],
+      "modul_kaynagi": [
+        "OpticalDrv.c",
+        "OtdDrv.c"
+      ],
+      "servis": [
+        "eta-touchdrv.service"
+      ],
+      "baslatici": [
+        "touchdrv_install"
+      ],
+      "udev_sha256": "d9207b9eaf0172b9",
+      "not": "Cekirdek 5.10 uyumu, aygit kaydi duzeltmesi.",
+      "kalibrasyon_esdegeri": [],
+      "sunucu_nesli": "B",
+      "modul_nesli": "M2",
+      "guncel_cekirdekte_derlenir": false,
+      "kademe1_uyumlu_modul": "fa24c98856490244"
+    },
+    {
+      "surum": "0.3.1",
+      "sinif": "resmi",
+      "koken": "etap-deposu",
+      "dosya": "paketler/eta-touchdrv_0.3.1_amd64.deb",
+      "boyut": 389132,
+      "sha256": "7103b17532f202c9fd2ca7056c15c0997472da39c0570827a8eb1b7644c96aa6",
+      "tarih": "Thu, 20 Oct 2022 16:40:48 +0300",
+      "strip_edilmis": true,
+      "upstream_blob": {
+        "otd_sunucu": "3fa38f3ab0db5e34",
+        "otd_modul": "4678e40bd9ea2846",
+        "optik_sunucu": "98f8ee35b8cd7241",
+        "optik_modul": "2d362ae9da92de57"
+      },
+      "sunucu": [
+        "OpticalService",
+        "OtdTouchServer"
+      ],
+      "modul_kaynagi": [
+        "OpticalDrv.c",
+        "OtdDrv.c"
+      ],
+      "servis": [
+        "eta-touchdrv.service"
+      ],
+      "baslatici": [
+        "touchdrv_install"
+      ],
+      "udev_sha256": "d9207b9eaf0172b9",
+      "not": "AMD islemci duzeltmesi + yeni sunucu blob'u.",
+      "kalibrasyon_esdegeri": [
+        "0.3.2"
+      ],
+      "sunucu_nesli": "C",
+      "modul_nesli": "M3",
+      "guncel_cekirdekte_derlenir": false,
+      "kademe1_uyumlu_modul": "4678e40bd9ea2846"
+    },
+    {
+      "surum": "0.3.2",
+      "sinif": "resmi",
+      "koken": "etap-deposu",
+      "dosya": "paketler/eta-touchdrv_0.3.2_amd64.deb",
+      "boyut": 389196,
+      "sha256": "dd74023b0641bb8f4bfa21deaea620a973fbfae5828b43fe515b8c0e99842707",
+      "tarih": "Fri, 02 May 2025 15:09:58 +0300",
+      "strip_edilmis": true,
+      "upstream_blob": {
+        "otd_sunucu": "3fa38f3ab0db5e34",
+        "otd_modul": "4678e40bd9ea2846",
+        "optik_sunucu": "98f8ee35b8cd7241",
+        "optik_modul": "2d362ae9da92de57"
+      },
+      "sunucu": [
+        "OpticalService",
+        "OtdTouchServer.x86_64"
+      ],
+      "modul_kaynagi": [
+        "OpticalDrv.c",
+        "OtdDrv.c"
+      ],
+      "servis": [
+        "eta-touchdrv.service"
+      ],
+      "baslatici": [
+        "touchdrv_install"
+      ],
+      "udev_sha256": "d9207b9eaf0172b9",
+      "not": "aarch64 blob eklendi; Vestel disi tahtalarda servis artik dongu yapmiyor.",
+      "kalibrasyon_esdegeri": [
+        "0.3.1"
+      ],
+      "sunucu_nesli": "C",
+      "modul_nesli": "M3",
+      "guncel_cekirdekte_derlenir": false,
+      "kademe1_uyumlu_modul": "4678e40bd9ea2846"
+    },
+    {
+      "surum": "0.3.3",
+      "sinif": "resmi",
+      "koken": "git-yeniden-paketleme",
+      "dosya": "paketler/eta-touchdrv_0.3.3_amd64.deb",
+      "boyut": 539416,
+      "sha256": "4038b296881c7855cfc41fbc27a69ba550ff425416ee6ee8d4061480cc980601",
+      "tarih": "Thu, 15 May 2025 12:28:28 +0300",
+      "strip_edilmis": false,
+      "upstream_blob": {
+        "otd_sunucu": "3fa38f3ab0db5e34",
+        "otd_modul": "e95ddf7f011483ed",
+        "optik_sunucu": "98f8ee35b8cd7241",
+        "optik_modul": "2e9ea9c7316c187e"
+      },
+      "sunucu": [
+        "OpticalService",
+        "OtdTouchServer.x86_64"
+      ],
+      "modul_kaynagi": [
+        "OpticalDrv.c",
+        "OtdDrv.c"
+      ],
+      "servis": [
+        "eta-touchdrv.service"
+      ],
+      "baslatici": [
+        "touchdrv_install"
+      ],
+      "udev_sha256": "d9207b9eaf0172b9",
+      "not": "6.8 sonrasi DKMS derleme duzeltmesi (modul kaynagi degisti).",
+      "kalibrasyon_esdegeri": [
+        "0.3.4",
+        "0.3.5"
+      ],
+      "sunucu_nesli": "C",
+      "modul_nesli": "M4",
+      "guncel_cekirdekte_derlenir": true,
+      "kademe1_uyumlu_modul": "e95ddf7f011483ed"
+    },
+    {
+      "surum": "0.3.4",
+      "sinif": "resmi",
+      "koken": "etap-deposu",
+      "dosya": "paketler/eta-touchdrv_0.3.4_amd64.deb",
+      "boyut": 389200,
+      "sha256": "471c5b1c58071279c8f50bd3e18bc6f9e7e7757377031bc97e1944fbc8f4d4fb",
+      "tarih": "Wed, 20 Aug 2025 00:29:18 +0300",
+      "strip_edilmis": true,
+      "upstream_blob": {
+        "otd_sunucu": "3fa38f3ab0db5e34",
+        "otd_modul": "e95ddf7f011483ed",
+        "optik_sunucu": "98f8ee35b8cd7241",
+        "optik_modul": "2e9ea9c7316c187e"
+      },
+      "sunucu": [
+        "OpticalService",
+        "OtdTouchServer.x86_64"
+      ],
+      "modul_kaynagi": [
+        "OpticalDrv.c",
+        "OtdDrv.c"
+      ],
+      "servis": [
+        "eta-touchdrv.service"
+      ],
+      "baslatici": [
+        "touchdrv_install"
+      ],
+      "udev_sha256": "d9207b9eaf0172b9",
+      "not": "Makefile KVER duzeltmesi; sunucu ve modul 0.3.3 ile ayni.",
+      "kalibrasyon_esdegeri": [
+        "0.3.3",
+        "0.3.5"
+      ],
+      "sunucu_nesli": "C",
+      "modul_nesli": "M4",
+      "guncel_cekirdekte_derlenir": true,
+      "kademe1_uyumlu_modul": "e95ddf7f011483ed"
+    },
+    {
+      "surum": "0.3.5",
+      "sinif": "resmi",
+      "koken": "etap-deposu",
+      "dosya": "paketler/eta-touchdrv_0.3.5_amd64.deb",
+      "boyut": 389436,
+      "sha256": "b9ac46d6723c0c7d3bffa96e102ea1aa74ee71ef19fa306e2696a379342fe861",
+      "tarih": "Wed, 10 Sep 2025 17:01:08 +0300",
+      "strip_edilmis": true,
+      "upstream_blob": {
+        "otd_sunucu": "3fa38f3ab0db5e34",
+        "otd_modul": "e95ddf7f011483ed",
+        "optik_sunucu": "98f8ee35b8cd7241",
+        "optik_modul": "2e9ea9c7316c187e"
+      },
+      "sunucu": [
+        "OpticalService",
+        "OtdTouchServer.x86_64"
+      ],
+      "modul_kaynagi": [
+        "OpticalDrv.c",
+        "OtdDrv.c"
+      ],
+      "servis": [
+        "eta-touchdrv.service"
+      ],
+      "baslatici": [
+        "touchdrv_install",
+        "touchdrv_restart"
+      ],
+      "udev_sha256": "c2aa61ffb4771f8a",
+      "not": "Servis ve udev sorunlari duzeltildi; touchdrv_restart eklendi. Sunucu ve modul 0.3.3/0.3.4 ile ayni.",
+      "kalibrasyon_esdegeri": [
+        "0.3.3",
+        "0.3.4"
+      ],
+      "sunucu_nesli": "C",
+      "modul_nesli": "M4",
+      "guncel_cekirdekte_derlenir": true,
+      "kademe1_uyumlu_modul": "e95ddf7f011483ed"
+    },
+    {
+      "surum": "0.3.6~tbt1",
+      "sinif": "resmi",
+      "koken": "git-yeniden-paketleme",
+      "dosya": "paketler/eta-touchdrv_0.3.6~tbt1_amd64.deb",
+      "boyut": 269776,
+      "sha256": "3e728a3d02b6ea2939829e4c1320bd31837e94157cbf345aab553fc14ff867a9",
+      "tarih": "Fri, 06 Mar 2026 09:46:26 +0300",
+      "strip_edilmis": false,
+      "upstream_blob": {
+        "otd_sunucu": "f7b2a63e85c0129d",
+        "otd_modul": "d349bb857badd283",
+        "optik_sunucu": "98f8ee35b8cd7241",
+        "optik_modul": "2e9ea9c7316c187e"
+      },
+      "sunucu": [
+        "OpticalService",
+        "OtdTouchServer.x86_64"
+      ],
+      "modul_kaynagi": [
+        "OpticalDrv.c",
+        "OtdDrv.c"
+      ],
+      "servis": [
+        "eta-touchdrv.service"
+      ],
+      "baslatici": [
+        "touchdrv_install",
+        "touchdrv_restart"
+      ],
+      "udev_sha256": "c2aa61ffb4771f8a",
+      "not": "Kernel kaynaklari + touch4 blob'u guncellendi. ETAP deposunda yayinlanmadi; yalnizca upstream git etiketinde var.",
+      "kalibrasyon_esdegeri": [],
+      "sunucu_nesli": "D",
+      "modul_nesli": "M5",
+      "guncel_cekirdekte_derlenir": true,
+      "kademe1_uyumlu_modul": "d349bb857badd283"
+    },
+    {
+      "surum": "0.4.0~beta1",
+      "sinif": "resmi",
+      "koken": "yerel-arsiv",
+      "dosya": "paketler/eta-touchdrv_0.4.0~beta1_amd64.deb",
+      "boyut": 106088,
+      "sha256": "9794ef7a5bc63bbbde37073e86cba1cd607a849a1c523fee4109fed6a1cec1b9",
+      "tarih": "Mon, 21 Apr 2025 14:51:27 +0300",
+      "strip_edilmis": true,
+      "upstream_blob": {
+        "otd_sunucu": "tekil-beta1",
+        "otd_modul": "844eca6074da0f7b",
+        "optik_sunucu": "98f8ee35b8cd7241",
+        "optik_modul": "8e89e58e152799a4"
+      },
+      "sunucu": [
+        "OpticalService",
+        "OtdTouchServer"
+      ],
+      "modul_kaynagi": [
+        "OpticalDrv.c",
+        "OtdDrv.c"
+      ],
+      "servis": [
+        "eta-touchdrv.service"
+      ],
+      "baslatici": [
+        "touchdrv_install"
+      ],
+      "udev_sha256": "d9207b9eaf0172b9",
+      "not": "Upstream'de karsiligi olmayan ara derleme; changelog kaydi yalnizca '* Test'. Kendine ozgu bir sunucu ikilisi tasiyor ama kernel kaynaklari 0.2.0 ile ayni (2020 tarihli). Aykiri deger; 6.12 cekirdeginde DKMS derlemesi beklenmiyor.",
+      "kalibrasyon_esdegeri": [],
+      "sunucu_nesli": "E",
+      "modul_nesli": "M1",
+      "guncel_cekirdekte_derlenir": false,
+      "kademe1_uyumlu_modul": "844eca6074da0f7b"
+    },
+    {
+      "surum": "0.4.0",
+      "sinif": "resmi",
+      "koken": "yerel-arsiv",
+      "dosya": "paketler/eta-touchdrv_0.4.0_amd64.deb",
+      "boyut": 120412,
+      "sha256": "0b3ce4e68c1c8eae3466b48ce0d40c9ff178adb6ac8f544840202cec79327aef",
+      "tarih": "Tue, 10 Mar 2026 12:00:44 +0300",
+      "strip_edilmis": true,
+      "upstream_blob": {
+        "otd_sunucu": "d665aa827e684e74",
+        "otd_modul": "d349bb857badd283",
+        "optik_sunucu": "98f8ee35b8cd7241",
+        "optik_modul": "2e9ea9c7316c187e"
+      },
+      "sunucu": [
+        "OpticalService",
+        "OtdTouchServer.x86_64"
+      ],
+      "modul_kaynagi": [
+        "OpticalDrv.c",
+        "OtdDrv.c"
+      ],
+      "servis": [
+        "eta-touchdrv.service"
+      ],
+      "baslatici": [
+        "touchdrv_install",
+        "touchdrv_restart"
+      ],
+      "udev_sha256": "c2aa61ffb4771f8a",
+      "not": "Yeni nesil sunucu: --ellipse-backend / --verbose / --debug-touch-pipeline destegi ve ELLIPSE_FITTER, TOUCH_DEBUG_LOG ortam degiskenleri. ETAP deposunda yayinlanmadi.",
+      "kalibrasyon_esdegeri": [],
+      "sunucu_nesli": "F",
+      "modul_nesli": "M5",
+      "guncel_cekirdekte_derlenir": true,
+      "kademe1_uyumlu_modul": "d349bb857badd283"
+    },
+    {
+      "surum": "0.5.0",
+      "sinif": "resmi",
+      "koken": "etap-deposu",
+      "dosya": "paketler/eta-touchdrv_0.5.0_amd64.deb",
+      "boyut": 410532,
+      "sha256": "19541f72a871848bc1cef83b8c5a8b78bda6d4ed7420033697ac2bb57c24aa1b",
+      "tarih": "Thu, 02 Apr 2026 06:58:10 +0000",
+      "strip_edilmis": true,
+      "upstream_blob": {
+        "otd_sunucu": "5b9e38a5d22230e4",
+        "otd_modul": "d349bb857badd283",
+        "optik_sunucu": "98f8ee35b8cd7241",
+        "optik_modul": "2e9ea9c7316c187e"
+      },
+      "sunucu": [
+        "OpticalService",
+        "OtdTouchServer.x86_64"
+      ],
+      "modul_kaynagi": [
+        "OpticalDrv.c",
+        "OtdDrv.c"
+      ],
+      "servis": [
+        "eta-touchdrv@.service"
+      ],
+      "baslatici": [
+        "touchdrv_launcher"
+      ],
+      "udev_sha256": "d7755e85a15c17d7",
+      "not": "systemd/udev yeniden yazildi: eta-touchdrv@.service sablonu + touchdrv_launcher. Restart=on-failure eklendi.",
+      "kalibrasyon_esdegeri": [
+        "0.5.1"
+      ],
+      "sunucu_nesli": "G",
+      "modul_nesli": "M5",
+      "guncel_cekirdekte_derlenir": true,
+      "kademe1_uyumlu_modul": "d349bb857badd283"
+    },
+    {
+      "surum": "0.5.1",
+      "sinif": "resmi",
+      "koken": "etap-deposu",
+      "dosya": "paketler/eta-touchdrv_0.5.1_amd64.deb",
+      "boyut": 410432,
+      "sha256": "5dd9ba76ff1236481bb5ac16c5419ac7727aaa41bfe5ee0b4de259022dae07c2",
+      "tarih": "Mon, 08 Jun 2026 12:58:10 +0300",
+      "strip_edilmis": true,
+      "upstream_blob": {
+        "otd_sunucu": "5b9e38a5d22230e4",
+        "otd_modul": "d349bb857badd283",
+        "optik_sunucu": "98f8ee35b8cd7241",
+        "optik_modul": "2e9ea9c7316c187e"
+      },
+      "sunucu": [
+        "OpticalService",
+        "OtdTouchServer.x86_64"
+      ],
+      "modul_kaynagi": [
+        "OpticalDrv.c",
+        "OtdDrv.c"
+      ],
+      "servis": [
+        "eta-touchdrv@.service"
+      ],
+      "baslatici": [
+        "touchdrv_launcher"
+      ],
+      "udev_sha256": "d7755e85a15c17d7",
+      "not": "0.5.0 ile ayni ikililer; yalnizca StartLimitIntervalSec konumu duzeltildi.",
+      "kalibrasyon_esdegeri": [
+        "0.5.0"
+      ],
+      "sunucu_nesli": "G",
+      "modul_nesli": "M5",
+      "guncel_cekirdekte_derlenir": true,
+      "kademe1_uyumlu_modul": "d349bb857badd283"
+    },
+    {
+      "surum": "0.3.1",
+      "sinif": "varyant",
+      "koken": "yerel-arsiv",
+      "dosya": "varyantlar/eta-touchdrv_0.3.1_amd64.deb",
+      "boyut": 389664,
+      "sha256": "a247e15128c547eb47ad97948e65959f22ca98e41b5144c4091590e1989fbc9e",
+      "tarih": "Thu, 20 Oct 2022 16:40:48 +0300",
+      "strip_edilmis": true,
+      "upstream_blob": {
+        "otd_sunucu": "3fa38f3ab0db5e34",
+        "otd_modul": "4678e40bd9ea2846",
+        "optik_sunucu": "98f8ee35b8cd7241",
+        "optik_modul": "2d362ae9da92de57"
+      },
+      "sunucu": [
+        "OpticalService",
+        "OtdTouchServer"
+      ],
+      "modul_kaynagi": [
+        "OpticalDrv.c",
+        "OtdDrv.c"
+      ],
+      "servis": [
+        "eta-touchdrv.service"
+      ],
+      "baslatici": [
+        "touchdrv_install"
+      ],
+      "udev_sha256": "d9207b9eaf0172b9",
+      "not": "ETAP kurulum kalibindan cikan, 0.3.1 surum numarasini tasiyan ikinci bir derleme. Dosya listesi ve boyutlar depodakiyle ayni, sunucu ikilisinin Build ID'si farkli (af045fb2... / 6372a1ee...). Ayni kaynagin farkli derlemesi olmasi kuvvetle muhtemel; yine de ayri bir deneme adimi sayilir.",
+      "kalibrasyon_esdegeri": [],
+      "sunucu_nesli": "tekil",
+      "modul_nesli": "tekil",
+      "guncel_cekirdekte_derlenir": false,
+      "kademe1_uyumlu_modul": null
+    },
+    {
+      "surum": "0.5.2",
+      "sinif": "ucuncu-taraf",
+      "koken": "ucuncu-taraf-surum",
+      "dosya": "ucuncu-taraf/eta-touchdrv_0.5.2_amd64.deb",
+      "boyut": 410612,
+      "sha256": "3e2025e2aa11cbe895f93a3fa0c5431b9d60c463e020f7b7b0aecfd6f56f52ec",
+      "tarih": "Thu, 06 May 2026 06:58:10 +0000",
+      "strip_edilmis": true,
+      "upstream_blob": null,
+      "sunucu": [
+        "OpticalTouchServer.x86_64",
+        "OpticalTouchServer.x86_64"
+      ],
+      "modul_kaynagi": [
+        "OpticalDrv.c"
+      ],
+      "servis": [
+        "eta-touchdrv@.service"
+      ],
+      "baslatici": [
+        "touchdrv_launcher"
+      ],
+      "udev_sha256": "420b052472728df5",
+      "not": "Resmi degil (github.com/vrdons/eta-touchdrv catali). Ikili adlari ve dizin duzeni farkli; tek surucu (OpticalDrv) kullanir.",
+      "kalibrasyon_esdegeri": [],
+      "sunucu_nesli": "tekil",
+      "modul_nesli": "tekil",
+      "guncel_cekirdekte_derlenir": false,
+      "kademe1_uyumlu_modul": null
+    },
+    {
+      "surum": "0.5.3",
+      "sinif": "ucuncu-taraf",
+      "koken": "ucuncu-taraf-surum",
+      "dosya": "ucuncu-taraf/eta-touchdrv_0.5.3_amd64.deb",
+      "boyut": 410728,
+      "sha256": "46936a7832d609db7c7b133950c02109f298062b03e691bd686acf00f0fcf0a2",
+      "tarih": "Tue, 10 Mar 2026 12:00:44 +0300",
+      "strip_edilmis": true,
+      "upstream_blob": null,
+      "sunucu": [
+        "OpticalTouchServer.x86_64",
+        "OpticalTouchServer.x86_64"
+      ],
+      "modul_kaynagi": [
+        "OpticalDrv.c"
+      ],
+      "servis": [
+        "eta-touchdrv@.service"
+      ],
+      "baslatici": [
+        "touchdrv_launcher"
+      ],
+      "udev_sha256": null,
+      "not": "Resmi degil (vrdons catali).",
+      "kalibrasyon_esdegeri": [],
+      "sunucu_nesli": "tekil",
+      "modul_nesli": "tekil",
+      "guncel_cekirdekte_derlenir": false,
+      "kademe1_uyumlu_modul": null
+    }
+  ]
+}

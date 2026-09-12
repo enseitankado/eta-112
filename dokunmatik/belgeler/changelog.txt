@@ -1,0 +1,92 @@
+eta-touchdrv (0.5.1) stable; urgency=medium
+
+  * Fix StartLimitIntervalSec location in service file
+
+ -- Fatih Altun <fatih.altun@pardus.org.tr>  Mon, 08 Jun 2026 12:58:10 +0300
+
+eta-touchdrv (0.5.0) stable; urgency=medium
+
+  [ Yusuf Düzgün ]
+  * refactor - systemd service, udev rules and scripts
+  * update service restart policy and launcher exit code
+
+  [ Fatih Altun ]
+  * Update touch4 binary from otd:c5290aa3b2
+
+ -- Fatih Altun <fatih.altun@pardus.org.tr>  Thu, 02 Apr 2026 06:58:10 +0000
+
+eta-touchdrv (0.4.0) stable; urgency=medium
+
+  * Update touch4 binary
+
+ -- Fatih Altun <fatih.altun@pardus.org.tr>  Tue, 10 Mar 2026 12:00:44 +0300
+
+eta-touchdrv (0.3.6~tbt1) stable; urgency=medium
+
+  * Update kernel sources
+  * Update touch4 binary
+
+ -- Fatih Altun <fatih.altun@pardus.org.tr>  Fri, 06 Mar 2026 09:46:26 +0300
+
+eta-touchdrv (0.3.5) stable; urgency=medium
+
+  * fixed start service and udev problems
+
+ -- Yusuf Düzgün <yusuf.duzgun@pardus.org.tr>  Wed, 10 Sep 2025 17:01:08 +0300
+
+eta-touchdrv (0.3.4) stable; urgency=medium
+
+  * Fix kernel build to use KVER instead of uname -r
+
+ -- Fatih Altun <fatih.altun@pardus.org.tr>  Wed, 20 Aug 2025 00:29:18 +0300
+
+eta-touchdrv (0.3.3) stable; urgency=medium
+
+  [ Ali Riza KESKIN ]
+  * fix dkms build after 6.8.0
+
+ -- Fatih Altun <fatih.altun@pardus.org.tr>  Thu, 15 May 2025 12:28:28 +0300
+
+eta-touchdrv (0.3.2) stable; urgency=medium
+
+  [ Ali Riza KESKIN ]
+  * add aarch64 service blob
+  * Dont exit service for non vestel boards. Because it continuously restarts.
+
+ -- Fatih Altun <fatih.altun@pardus.org.tr>  Fri, 02 May 2025 15:09:58 +0300
+
+eta-touchdrv (0.3.1) stable; urgency=medium
+
+  [ Ali Riza KESKIN ]
+  * update service blob
+  * fix for amd cpu
+
+ -- Fatih Altun <fatih.altun@pardus.org.tr>  Thu, 20 Oct 2022 16:40:48 +0300
+
+eta-touchdrv (0.3.0) stable; urgency=medium
+
+  [ Ali Rıza KESKİN ]
+  * fix for 5.10
+  * remove unused deps
+  * better code legibility
+  * Update OtdDrv.c
+  * better code legibility
+  * Fix device register issue
+
+ -- Fatih Altun <fatih.altun@pardus.org.tr>  Thu, 20 Oct 2022 16:40:48 +0300
+
+eta-touchdrv (0.2.0) stable; urgency=medium
+
+  * Update driver for Etap 19
+  * Update debian folder
+
+ -- Fatih Altun <fatih.altun@pardus.org.tr>  Thu, 18 Jun 2020 12:09:10 +0300
+
+eta-touchdrv (0.1.8) stable; urgency=medium
+
+  * Fix for phase 1 ssd edition
+
+ -- Cihangir Aktürk <cihangir.akturk@pardus.org.tr>  Mon, 30 Dec 2019 19:05:50 +0300
+
+# Older entries have been removed from this changelog.
+# To read the complete changelog use `apt changelog eta-touchdrv`.
