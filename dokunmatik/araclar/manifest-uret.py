@@ -35,6 +35,7 @@ DIZINLER = {
 
 # Paketin nereden geldigi.
 KOKEN = {
+    "0.1.7": "git-yeniden-paketleme",
     "0.1.8": "yerel-arsiv",
     "0.2.0": "git-yeniden-paketleme",
     "0.3.0": "git-yeniden-paketleme",
@@ -56,8 +57,14 @@ KOKEN = {
 # upstream git etiketlerindeki ham (strip'siz) blob ozetleri -- sha256, ilk 16 hane.
 # "-" = o surumde o dosya yok.
 UPSTREAM = {
-    "0.1.8":      {"otd_sunucu": "2b5861ca6266fe38", "otd_modul": "-",
-                   "optik_sunucu": "-",              "optik_modul": "-"},
+    # 0.1.x agaci farkli adlar kullanir (opticServer / optictouch.c /
+    # OtdTouchDriver.c); upstream-ozet.sh artik bu adlari da tarar. Once "-"
+    # yazili olan uc alan bu yuzden bostu -- dosyalar yoktu degil, adlari
+    # farkliydi.
+    "0.1.7":      {"otd_sunucu": "2b5861ca6266fe38", "otd_modul": "513502ee8a57721e",
+                   "optik_sunucu": "a9096af09f34cbef", "optik_modul": "41ff9cf8b16abced"},
+    "0.1.8":      {"otd_sunucu": "2b5861ca6266fe38", "otd_modul": "513502ee8a57721e",
+                   "optik_sunucu": "a9096af09f34cbef", "optik_modul": "026c40205ee38f1f"},
     "0.2.0":      {"otd_sunucu": "d3bd5abd382c9447", "otd_modul": "844eca6074da0f7b",
                    "optik_sunucu": "98f8ee35b8cd7241", "optik_modul": "8e89e58e152799a4"},
     "0.3.0":      {"otd_sunucu": "d3bd5abd382c9447", "otd_modul": "fa24c98856490244",
@@ -79,10 +86,15 @@ UPSTREAM = {
     #    0.2.0'inkilerle birebir ayni cikti.
     #  * OpticalService, 0.3.1/0.3.2 paketlerindekiyle BAYT BAYT ayni (ce5cd65a...,
     #    35168 bayt) -> onlarin upstream blob'u neyse bu da odur.
-    #  * OtdTouchServer benzersiz (3e7cbe4c..., 88336 bayt); hicbir surumle
-    #    eslesmiyor ve strip'li oldugu icin upstream blob'lariyla kiyaslanamaz.
-    #    "tekil-*" sentinel'i ayri bir nesil sayilmasini saglar.
-    "0.4.0~beta1": {"otd_sunucu": "tekil-beta1",        "otd_modul": "844eca6074da0f7b",
+    #  * OtdTouchServer dosya ozeti benzersiz (3e7cbe4c..., 88336 bayt) ve bu
+    #    yuzden once "tekil-beta1" sayilmisti -- YANLIS. Dosya farki yalnizca
+    #    strip'ten geliyor: GNU Build ID'si 0.2.0/0.3.0 ikilisiyle AYNI
+    #    (77d9b0323809388d...) ve .text/.rodata/.data/.init/.fini/.plt/.got/
+    #    .dynsym/.dynstr bolumlerinin tamami bayt bayt esit. Tek fark 0.2.0'in
+    #    debug bolumlerini + symtab'i tasimasi, beta1'in ise strip'lenip
+    #    .gnu_debuglink almasi. Ayni programin iki paketlemesi -> ayni blob.
+    #    (Dogrulama: readelf -n / objcopy --only-section, 2026-09-13.)
+    "0.4.0~beta1": {"otd_sunucu": "d3bd5abd382c9447", "otd_modul": "844eca6074da0f7b",
                     "optik_sunucu": "98f8ee35b8cd7241", "optik_modul": "8e89e58e152799a4"},
     "0.4.0":      {"otd_sunucu": "d665aa827e684e74", "otd_modul": "d349bb857badd283",
                    "optik_sunucu": "98f8ee35b8cd7241", "optik_modul": "2e9ea9c7316c187e"},
@@ -94,8 +106,16 @@ UPSTREAM = {
 
 # Neden denenmeye deger / neye dikkat etmeli.
 NOTLAR = {
+    "0.1.7": "Pardus ETAP 5.2 ve 2019 tarihli tahta imajlarindan cikti; ETAP deposunda "
+             "yok, upstream etiketinden paketlendi. Sunucu ikilileri 0.1.8 ile birebir "
+             "AYNI; tek fark touch2 kernel modulu (optictouch.c). 0.1.8 bunu 'phase 1 "
+             "ssd edition' icin hizlandirmis: COMMAND_RETRY_COUNT 10->8, msleep 200->50 "
+             "ve acilistaki msleep 8000->300. Yavas/kararsiz 2 kameralali panellerde "
+             "0.1.7'nin sabirli zamanlamasi denenmeye deger. Guncel cekirdekte DKMS "
+             "derlemesi beklenmez.",
     "0.1.8": "ETAP 19 oncesi; kernel modulu OtdTouchDriver.c, optik tarafta opticServer. "
-             "Guncel cekirdekte DKMS derlemesi buyuk ihtimalle basarisiz olur.",
+             "Sunucularin ikisi de 0.1.7 ile ayni; 0.1.7'den tek farki hizlandirilmis "
+             "touch2 modulu. Guncel cekirdekte DKMS derlemesi buyuk ihtimalle basarisiz olur.",
     "0.2.0": "OtdDrv.c'ye gecis. ETAP 19 icin guncellenen ilk surum.",
     "0.3.0": "Cekirdek 5.10 uyumu, aygit kaydi duzeltmesi.",
     "0.3.1": "AMD islemci duzeltmesi + yeni sunucu blob'u.",
@@ -107,9 +127,10 @@ NOTLAR = {
     "0.3.6~tbt1": "Kernel kaynaklari + touch4 blob'u guncellendi. ETAP deposunda "
                   "yayinlanmadi; yalnizca upstream git etiketinde var.",
     "0.4.0~beta1": "Upstream'de karsiligi olmayan ara derleme; changelog kaydi yalnizca "
-                   "'* Test'. Kendine ozgu bir sunucu ikilisi tasiyor ama kernel "
-                   "kaynaklari 0.2.0 ile ayni (2020 tarihli). Aykiri deger; 6.12 "
-                   "cekirdeginde DKMS derlemesi beklenmiyor.",
+                   "'* Test'. Sunucu ikilisi de kernel kaynaklari da 0.2.0/0.3.0 ile "
+                   "ayni (sunucu yalnizca strip'lenmis; Build ID 77d9b032... esit). "
+                   "Denemeye deger yeni bir ikili tasimiyor; 6.12 cekirdeginde DKMS "
+                   "derlemesi de beklenmiyor.",
     "0.4.0": "Yeni nesil sunucu: --ellipse-backend / --verbose / --debug-touch-pipeline "
              "destegi ve ELLIPSE_FITTER, TOUCH_DEBUG_LOG ortam degiskenleri. "
              "ETAP deposunda yayinlanmadi.",
@@ -231,23 +252,37 @@ def main() -> int:
             e for e in gruplar[kalibrasyon_imzasi(k)] if e != etiket(k)
         ]
 
-    # Sunucu ve modul nesillerini (A.., M1..) surum sirasina gore etiketle.
-    sunucu_nesli: dict[str, str] = {}
-    modul_nesli: dict[str, str] = {}
+    # Nesil etiketleri, surum sirasina gore. Dort ayri seri var; panel tipi
+    # hangisine bakacagini belirler:
+    #   OTD (2621 / 4 kamera)      sunucu A..    modul M1..
+    #   Optical (6615 / 2 kamera)  sunucu a..    modul o1..
+    nesiller: dict[str, dict[str, str]] = {a: {} for a in
+                                           ("otd_sunucu", "otd_modul",
+                                            "optik_sunucu", "optik_modul")}
+
+    def etiketle(alan: str, deger: str) -> str:
+        n = len(nesiller[alan])
+        return {"otd_sunucu": lambda: chr(ord("A") + n),
+                "optik_sunucu": lambda: chr(ord("a") + n),
+                "otd_modul": lambda: f"M{n + 1}",
+                "optik_modul": lambda: f"o{n + 1}"}[alan]()
+
+    for k in kayitlar:
+        u = k["upstream_blob"] if k["sinif"] == "resmi" else None
+        for alan in nesiller:
+            d = u[alan] if u else None
+            if d and d != "-" and d not in nesiller[alan]:
+                nesiller[alan][d] = etiketle(alan, d)
     for k in kayitlar:
         u = k["upstream_blob"] if k["sinif"] == "resmi" else None
         s = u["otd_sunucu"] if u else None
         m = u["otd_modul"] if u else None
-        if s and s != "-" and s not in sunucu_nesli:
-            sunucu_nesli[s] = chr(ord("A") + len(sunucu_nesli))
-        if m and m != "-" and m not in modul_nesli:
-            modul_nesli[m] = f"M{len(modul_nesli) + 1}"
-    for k in kayitlar:
-        u = k["upstream_blob"] if k["sinif"] == "resmi" else None
-        s = u["otd_sunucu"] if u else None
-        m = u["otd_modul"] if u else None
-        k["sunucu_nesli"] = sunucu_nesli.get(s or "", "tekil")
-        k["modul_nesli"] = modul_nesli.get(m or "", "tekil" if m != "-" else "yok")
+        k["sunucu_nesli"] = nesiller["otd_sunucu"].get(s or "", "tekil")
+        k["modul_nesli"] = nesiller["otd_modul"].get(m or "", "tekil" if m != "-" else "yok")
+        for alan, ad in (("optik_sunucu", "optik_sunucu_nesli"),
+                         ("optik_modul", "optik_modul_nesli")):
+            d = u[alan] if u else None
+            k[ad] = nesiller[alan].get(d or "", "tekil" if d != "-" else "yok")
         # Kademe 2 (tam .deb kurulumu) 6.8+ cekirdekte gerceklesebilir mi.
         k["guncel_cekirdekte_derlenir"] = m in GUNCEL_CEKIRDEKTE_DERLENEN
         # Kademe 1 (yalnizca sunucu degis-tokusu): ayni modul nesliyle yayinlanan

@@ -18,16 +18,30 @@ g() { git cat-file -p "$TAG:$1" > "$2"; }
 has() { git cat-file -e "$TAG:$1" 2>/dev/null; }
 
 # --- debian/rules'a gore yuk (payload)
-g touch2/kernelSrc/Makefile     "$ROOT/usr/src/eta-touchdrv-$VER/touch2/Makefile"
-g touch2/kernelSrc/OpticalDrv.c "$ROOT/usr/src/eta-touchdrv-$VER/touch2/OpticalDrv.c"
-g touch2/kernelSrc/OpticalDrv.h "$ROOT/usr/src/eta-touchdrv-$VER/touch2/OpticalDrv.h"
-g touch4/kernel/Makefile        "$ROOT/usr/src/eta-touchdrv-$VER/touch4/Makefile"
-g touch4/kernel/OtdDrv.c        "$ROOT/usr/src/eta-touchdrv-$VER/touch4/OtdDrv.c"
-g touch4/kernel/OtdDrv.h        "$ROOT/usr/src/eta-touchdrv-$VER/touch4/OtdDrv.h"
+#
+# Iki yerlesim var; hangisi varsa o alinir:
+#   yeni (0.2.0+)  touch2/kernelSrc/OpticalDrv.{c,h}  touch2/opticServer/OpticalService
+#                  touch4/kernel/OtdDrv.{c,h}         touch4/otdServer/OtdTouchServer[.x86_64]
+#   eski (<=0.1.8) touch2/kernelSrc/optictouch.c      touch2/opticServer/opticServer
+#                  touch4/kernel/OtdTouchDriver.c     touch4/otdServer/OtdTouchServer
+# Eski yerlesimde .h dosyasi yok; modul tek .c dosyasindan derlenir.
+T2="$ROOT/usr/src/eta-touchdrv-$VER/touch2"
+T4="$ROOT/usr/src/eta-touchdrv-$VER/touch4"
+g touch2/kernelSrc/Makefile "$T2/Makefile"
+g touch4/kernel/Makefile    "$T4/Makefile"
+for f in OpticalDrv.c OpticalDrv.h optictouch.c; do
+    has "touch2/kernelSrc/$f" && g "touch2/kernelSrc/$f" "$T2/$f" || true
+done
+for f in OtdDrv.c OtdDrv.h OtdTouchDriver.c; do
+    has "touch4/kernel/$f" && g "touch4/kernel/$f" "$T4/$f" || true
+done
 
-g touch2/opticServer/OpticalService        "$ROOT/usr/bin/OpticalService"
 g touch2/calibrationTools/calibrationTools "$ROOT/usr/bin/calibrationTools"
 g touch4/calibration/OtdCalibrationTool    "$ROOT/usr/bin/OtdCalibrationTool"
+
+for f in OpticalService opticServer; do
+    has "touch2/opticServer/$f" && g "touch2/opticServer/$f" "$ROOT/usr/bin/$f" || true
+done
 
 if has touch4/otdServer/OtdTouchServer.x86_64; then
     g touch4/otdServer/OtdTouchServer.x86_64 "$ROOT/usr/bin/OtdTouchServer.x86_64"

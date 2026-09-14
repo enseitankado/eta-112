@@ -60,11 +60,11 @@ protokol belgesine bakın.
 ```
 dokunmatik/
 ├── surumler.json        Makine-okunur manifest — eta-112 bunu kullanır
-├── paketler/            Resmi Pardus/ETAP sürümleri (13 adet)
+├── paketler/            Resmi Pardus/ETAP sürümleri (14 adet)
 ├── varyantlar/          Aynı sürüm numarasının farklı derlemesi
 ├── ucuncu-taraf/        Resmi olmayan çatal (vrdons)
 ├── kaynak/              Kernel modülü kaynakları — diff için elde tutulan kopyalar
-├── araclar/             Arşivi yeniden üretmek için script'ler
+├── araclar/             Arşivi yeniden üretmek + ISO taramak için script'ler
 └── belgeler/            Mimari notu ve tam upstream changelog
 ```
 
@@ -77,26 +77,40 @@ polinomunu uygulayan kapalı kaynak daemon) ve **kernel modülü**. Aşağıdaki
 tabloda aynı harfi taşıyan sürümler bu iki açıdan birebir aynıdır — denemeye
 gerek yok.
 
-| Sürüm | Tarih | Sunucu | Modül | Servis / başlatıcı | Kaynak |
-|---|---|:---:|:---:|---|---|
-| 0.1.8 | 2019-12 | **A** | — | `eta-touchdrv.service` / `touchdrv_install` | yerel arşiv |
-| 0.2.0 | 2020-06 | **B** | **M1** | aynı | git'ten paketlendi |
-| 0.3.0 | 2022-10 | **B** | **M2** | aynı | git'ten paketlendi |
-| 0.3.1 | 2022-10 | **C** | **M3** | aynı | ETAP deposu |
-| 0.3.2 | 2025-05 | **C** | **M3** | aynı | ETAP deposu |
-| 0.3.3 | 2025-05 | **C** | **M4** | aynı | git'ten paketlendi |
-| 0.3.4 | 2025-08 | **C** | **M4** | aynı | ETAP deposu |
-| 0.3.5 | 2025-09 | **C** | **M4** | `+ touchdrv_restart` | ETAP deposu |
-| 0.4.0~beta1 | 2025-04 | **E** | **M1** | `eta-touchdrv.service` | yerel arşiv |
-| 0.3.6~tbt1 | 2026-03 | **D** | **M5** | `+ touchdrv_restart` | git'ten paketlendi |
-| 0.4.0 | 2026-03 | **F** | **M5** | `+ touchdrv_restart` | yerel arşiv |
-| 0.5.0 | 2026-04 | **G** | **M5** | `eta-touchdrv@.service` / `touchdrv_launcher` | ETAP deposu |
-| 0.5.1 | 2026-06 | **G** | **M5** | aynı | ETAP deposu |
+Panel tipi hangi sütuna bakacağınızı belirler: **4k** = OTD (2621, 4 kameralı),
+**2k** = Optical (6615, 2 kameralı). Her tarafın kendi sunucu ikilisi ve kendi
+kernel modülü var, ve bunlar birbirinden bağımsız değişmiş.
 
-Bu yüzden `surumler.json` içindeki `deneme_sirasi` 13 değil **9 adım**:
+| Sürüm | Tarih | 4k sun | 4k mod | 2k sun | 2k mod | Servis / başlatıcı | Kaynak |
+|---|---|:---:|:---:|:---:|:---:|---|---|
+| 0.1.7 | 2018-09 | **A** | **M1** | **a** | **o1** | `eta-touchdrv.service` / `touchdrv_install` | git'ten paketlendi |
+| 0.1.8 | 2019-12 | **A** | **M1** | **a** | **o2** | aynı | yerel arşiv |
+| 0.2.0 | 2020-06 | **B** | **M2** | **b** | **o3** | aynı | git'ten paketlendi |
+| 0.3.0 | 2022-10 | **B** | **M3** | **b** | **o4** | aynı | git'ten paketlendi |
+| 0.3.1 | 2022-10 | **C** | **M4** | **b** | **o4** | aynı | ETAP deposu |
+| 0.3.2 | 2025-05 | **C** | **M4** | **b** | **o4** | aynı | ETAP deposu |
+| 0.3.3 | 2025-05 | **C** | **M5** | **b** | **o5** | aynı | git'ten paketlendi |
+| 0.3.4 | 2025-08 | **C** | **M5** | **b** | **o5** | aynı | ETAP deposu |
+| 0.3.5 | 2025-09 | **C** | **M5** | **b** | **o5** | `+ touchdrv_restart` | ETAP deposu |
+| 0.4.0~beta1 | 2025-04 | **B** | **M2** | **b** | **o3** | `eta-touchdrv.service` | yerel arşiv |
+| 0.3.6~tbt1 | 2026-03 | **D** | **M6** | **b** | **o5** | `+ touchdrv_restart` | git'ten paketlendi |
+| 0.4.0 | 2026-03 | **E** | **M6** | **b** | **o5** | `+ touchdrv_restart` | yerel arşiv |
+| 0.5.0 | 2026-04 | **F** | **M6** | **b** | **o5** | `eta-touchdrv@.service` / `touchdrv_launcher` | ETAP deposu |
+| 0.5.1 | 2026-06 | **F** | **M6** | **b** | **o5** | aynı | ETAP deposu |
+
+**2 kameralı tarafın sunucusu neredeyse hiç değişmemiş:** tüm arşivde yalnızca iki
+nesil var. `a` = 0.1.x'in `opticServer`'ı (Build ID `65f97230…`), `b` = 0.2.0'dan
+0.5.1'e kadar 12 paketin tamamında bayt bayt aynı olan `OpticalService`
+(Build ID `a2044998…`, aynı `.text`/`.rodata`). Yani 2 kameralı bir tahtada
+Kademe 1 (sunucu değiş-tokuşu) `b` ailesi içinde hiçbir şeyi değiştirmez; araç bu
+sürümleri Kademe 1 listesinden düşürür, geriye tek aday olarak `a` kalır. O da
+tükendiğinde iş Kademe 2'ye, yani modül değiştirmeye kalır — ve orada 5 ayrı nesil
+(`o1`–`o5`) var.
+
+Bu yüzden `surumler.json` içindeki `deneme_sirasi` 14 değil **9 adım**:
 
 ```
-0.5.1 → 0.4.0 → 0.4.0~beta1 → 0.3.6~tbt1 → 0.3.5 → 0.3.2 → 0.3.0 → 0.2.0 → 0.1.8
+0.5.1 → 0.4.0 → 0.4.0~beta1 → 0.3.6~tbt1 → 0.3.5 → 0.3.2 → 0.3.0 → 0.1.8 → 0.1.7
 ```
 
 Yeniden eskiye gider; kalibrasyon regresyonlarının çoğu yakın tarihli bir
@@ -122,14 +136,14 @@ Modül + sunucu + servis + udev birlikte değişir; DKMS yeniden derler.
 ### Çekirdek kısıtı — Kademe 2'yi sınırlar
 
 Bu tahtada çekirdek **6.12.85**. Changelog'a göre DKMS derleme düzeltmesi
-0.3.3'te geldi (*"fix dkms build after 6.8.0"*). Dolayısıyla **M1/M2/M3 modülü
+0.3.3'te geldi (*"fix dkms build after 6.8.0"*). Dolayısıyla **M1–M4 modülü
 taşıyan sürümlerin 6.12'de derlenmesi beklenmez**:
 
 | Modül | Sürümler | 6.12'de derlenir mi |
 |---|---|---|
-| — / M1 / M2 / M3 | 0.1.8, 0.2.0, 0.3.0, 0.3.1, 0.3.2, 0.4.0~beta1 | Hayır (beklenmiyor) |
-| M4 | 0.3.3, 0.3.4, 0.3.5 | Evet |
-| M5 | 0.3.6~tbt1, 0.4.0, 0.5.0, 0.5.1 | Evet |
+| M1 / M2 / M3 / M4 | 0.1.7, 0.1.8, 0.2.0, 0.3.0, 0.3.1, 0.3.2, 0.4.0~beta1 | Hayır (beklenmiyor) |
+| M5 | 0.3.3, 0.3.4, 0.3.5 | Evet |
+| M6 | 0.3.6~tbt1, 0.4.0, 0.5.0, 0.5.1 | Evet |
 
 Yani tam kurulumla denenebilecek gerçekçi küme **0.5.1 → 0.4.0 → 0.3.6~tbt1 → 0.3.5**.
 Daha eski sunucuları görmek istiyorsanız Kademe 1'i kullanın.
@@ -140,16 +154,19 @@ Mimari notu `OtdDrv.ko ↔ OtdTouchServer` arasındaki **ioctl protokolünün s�
 bağlı** olduğunu söylüyor. Bu yüzden sunucu değiş-tokuşu her kombinasyon için
 güvenli değil:
 
-- **Güvenli:** kurulu modül M5 iken **D, F, G** sunucuları (0.3.6~tbt1, 0.4.0,
+- **Güvenli:** kurulu modül M6 iken **D, E, F** sunucuları (0.3.6~tbt1, 0.4.0,
   0.5.0/0.5.1) — hepsi aynı modülle birlikte yayınlandı.
-- **Riskli:** A, B, C, E sunucuları farklı modül nesilleriyle geldi; M5 modülü
+- **Riskli:** A, B, C sunucuları farklı modül nesilleriyle geldi; M6 modülü
   üzerinde çalışmayabilir. Denenebilir, ama başarısızlık "bu sürüm kötü"
   anlamına gelmez.
 
 **0.4.0~beta1 bir aykırı değer:** 2025-04 tarihli, changelog kaydı yalnızca
-`* Test`. Kendine özgü bir sunucu ikilisi (**E**) taşıyor ama kernel kaynakları
-2020 tarihli **M1**. Muhtemelen atılmış bir test derlemesi; hem Kademe 2'de
-derlenmesi beklenmiyor hem de Kademe 1'de riskli kümede.
+`* Test`. Sürüm numarası 0.4.0'ı çağrıştırsa da içeriği 2020'ye ait: hem kernel
+kaynakları (**M2**) hem sunucu ikilisi (**B**) 0.2.0/0.3.0 ile aynı. Sunucu
+ikilisi başta benzersiz sanılmıştı; fark yalnızca strip'ten geliyor — GNU Build
+ID'si (`77d9b032…`) ve tüm kod/veri bölümleri 0.2.0'ınkiyle bayt bayt eşit.
+Dolayısıyla denemeye değer yeni bir ikili taşımıyor; **B** neslinin temsilcisi
+olarak sırada bir kez yer alıyor (0.2.0 bu yüzden sıradan düştü).
 
 ### Sürüm serisi hakkında notlar
 
@@ -163,8 +180,15 @@ derlenmesi beklenmiyor hem de Kademe 1'de riskli kümede.
   (`otd:c5290aa3b2`).
 - **0.3.6~tbt1** ve **0.4.0** ETAP deposunda yayınlanmadı; deponun sürüm listesi
   0.3.5'ten 0.5.0'a atlıyor.
-- **0.1.x serisinin tamamı** (0.1.1-2 … 0.1.8) birebir aynı ikilileri taşır;
-  arşive yalnızca 0.1.8 alındı.
+- **0.1.x serisinin tamamı** (0.1.1-2 … 0.1.8) birebir aynı **ikilileri** taşır —
+  dört ikili de (`OtdTouchServer`, `opticServer`, iki kalibrasyon aracı) tüm
+  etiketlerde aynı blob. Ama **2 kameralı kernel modülü 0.1.8'de değişti**:
+  0.1.8'in changelog'u *"Fix for phase 1 ssd edition"* diyor ve `optictouch.c`'de
+  bekleme sürelerini kısaltıyor — `COMMAND_RETRY_COUNT` 10→8, `msleep(200)`→`50`,
+  açılıştaki `msleep(8000)`→`300`. Bu yüzden arşivde iki temsilci var:
+  **0.1.7** (sabırlı zamanlama, `o1`; 0.1.1-2 … 0.1.7'nin tamamını temsil eder) ve
+  **0.1.8** (SSD için hızlandırılmış, `o2`). Yavaş açılan 2 kameralı panellerde
+  0.1.7 denenmeye değer.
 - **vrdons 0.5.2/0.5.3** resmi değil: ikili adları farklı
   (`OpticalTouchServer.x86_64`), tek sürücü kullanıyor, dizin düzeni başka.
   Son çare olarak denenmek üzere `ucuncu-taraf/` altında.
@@ -233,7 +257,7 @@ ve hâlâ daemon kullanır.
 | Köken | Sürümler | Nasıl |
 |---|---|---|
 | ETAP deposu | 0.3.1, 0.3.2, 0.3.4, 0.3.5, 0.5.0, 0.5.1 | `apt-get download eta-touchdrv=<sürüm>` — `depo.etap.org.tr/etap yirmiuc/main` |
-| Upstream git | 0.2.0, 0.3.0, 0.3.3, 0.3.6~tbt1 | `araclar/paketle.sh` ile `debian/*` etiketlerinden yeniden paketlendi |
+| Upstream git | 0.1.7, 0.2.0, 0.3.0, 0.3.3, 0.3.6~tbt1 | `araclar/paketle.sh` ile `debian/*` etiketlerinden yeniden paketlendi |
 | Yerel arşiv | 0.1.8, 0.4.0~beta1, 0.4.0, 0.3.1 (varyant) | Elde bulunan, hiçbir depoda olmayan `.deb`'ler |
 | Üçüncü taraf | 0.5.2, 0.5.3 | `gh release download -R vrdons/eta-touchdrv` |
 
@@ -247,6 +271,63 @@ ikililerin `dh_strip`'ten geçmemiş olması (daha büyük, işlevsel olarak ayn
 
 Bu yüzden denklik grupları paket içeriğinden değil, upstream git'teki ham blob
 özetlerinden hesaplanır — bkz. `manifest-uret.py` içindeki `UPSTREAM` tablosu.
+
+`paketle.sh` ve `upstream-ozet.sh` iki ağaç düzenini de tanır: 0.2.0'da dosyalar
+yeniden adlandırıldı (`opticServer`→`OpticalService`, `optictouch.c`→`OpticalDrv.c`,
+`OtdTouchDriver.c`→`OtdDrv.c`), 0.1.x etiketleri hâlâ eski adları kullanıyor.
+
+### ISO taraması (2026-09-14)
+
+İki ağ paylaşımındaki (`\\canpc\iso`, `\\canpc\etap`) **18 imaj**, yeni sürücü/sunucu
+ikilisi var mı diye tarandı. Araç: [`araclar/iso-tara.sh`](araclar/iso-tara.sh) —
+`udisks2` ile döngü aygıtı kurar, `live/filesystem.squashfs`'i bağlayıp doğrudan
+okur; Clonezilla imajlarında `partclone` verisi **çözülmeden akış üzerinde**
+`dpkg` kayıtları ve `md5sums` satırları aranır. Hiçbir ISO indirilmez, root
+gerekmez. `lzip` ile sıkıştırılmış partclone verisi için
+[`araclar/lzipcat.py`](araclar/lzipcat.py) kullanılır (ETAP'ta `lzip` kurulu değil).
+
+| İmaj | Tarih | `eta-touchdrv` | Sonuç |
+|---|---|---|---|
+| Pardus-ETAP-5.2-amd64 | 2018-11 | **0.1.7** | **Yeni sürüm** — ikililer 0.1.8 ile aynı, `optictouch.c` farklı → arşive eklendi |
+| Faz-1 ETAP 5.5 (14MB24A) | 2019-04 | 0.1.7 | `md5sums` birebir aynı |
+| clonezilla-live-5-ekim-19 | 2019-10 | 0.1.7 | `md5sums` birebir aynı |
+| Faz-1-2 ETAP 5.3 (Legacy) | 2019 | 0.1.7 | `md5sums` birebir aynı |
+| Pardus-ETAP-5.3-amd64 | 2020-10 | 0.1.8 | Tüm dosyalar arşivdekiyle bayt bayt aynı |
+| Dikkat…FAZ_1_SSD_2020 | 2020 | 0.1.7 → **0.1.8** | `optictouch.c` dahil hepsi arşivdeki 0.1.8 ile aynı |
+| Ordu_Faz2_v3 = Faz-2 ETAP 5.3 (UEFI) | 2020-11 | 0.1.7 → 0.1.8 | Yeni ikili yok |
+| etahta.iso | 2022 | 0.2.0 | Build ID'ler ve modül özetleri arşivdekiyle aynı |
+| Faz-1-2-3 ETAP 19 2022 | 2022 | 0.2.0 | Aynı |
+| ETAP_b18.img (ham disk imajı) | 2022-10 | 0.3.0 | Aynı |
+| Etap55-Faz3-100YIL (TigerLake OPS) | 2023-10 | 0.3.0 — **kaldırılmış** (`deinstall ok config-files`) | Faz-3 tahtada sürücü yüklü değil; ikili yok |
+| Pardus-23.2-ETAP Beta | 2024-09 | 0.2.0 | Aynı |
+| Pardus-Etap-19.0-Beta-25 | 2024-10 | 0.3.1 | İçindeki `/tmp/eta-touchdrv.deb` arşivdekiyle **bayt bayt aynı** |
+| Pardus-23.3-ETAP | 2025-05 | 0.3.2 | Aynı |
+| Pardus-23.4-ETAP | 2025-10 | 0.3.5 | Aynı (çalışan tahtadaki 0.5.1 depo güncellemesinden geliyor) |
+| SIH-ETAP-OTOMATIK (VESTEL 14MB37C1) | 2026-06 | 0.5.1 | `md5sums` arşivdeki 0.5.0/0.5.1 ikilileriyle aynı |
+| Windows imajları (4 adet) | — | — | Taranmadı (Linux sürücüsü yok) |
+
+**Sonuç: yeni bir sunucu ikilisi çıkmadı.** Tek kazanım 0.1.7. Eklenen paket
+upstream `debian/0.1.7` etiketinden üretildi ve **ETAP 5.2 imajındaki `dpkg`
+`md5sums` kayıtlarıyla doğrulandı**: 15 dosyadan 11'i bayt bayt aynı; farklı olan
+4 dosya yalnızca `dh_strip`'ten geçmemiş ikililer (GNU Build ID'leri imajdakilerle
+özdeş). Aynı `md5sums` kümesi üç ayrı imajda (5.2, 5.5-Faz1, 5.3-Legacy, 5-ekim-19)
+birebir tekrarlandı.
+
+#### Yan kazanım: resmi depo özetleri
+
+Faz-3 ve 2026 imajlarının içindeki apt liste dosyalarından `eta-touchdrv` paket
+kayıtları da çıktı. Bunlar depo tarafından yayımlanan `Size`/`SHA256` değerleri
+olduğu için arşivdeki dosyaların gerçekliğini bağımsız doğruluyor:
+
+| Sürüm | Depo boyutu | Arşivdeki dosya |
+|---|---|---|
+| 0.3.1, 0.3.2, 0.3.4, 0.3.5, 0.5.0, 0.5.1 | 389132 / 389196 / 389200 / 389436 / 410532 / 410432 | **Altısı da depo SHA256'sıyla birebir** |
+| 0.2.0 | 106292 | Bizdeki 211676 baytlık git yeniden paketlemesi (strip'siz) — aynı program |
+| 0.1.7 | 100228 | Aynı şekilde git'ten paketlendi |
+
+Not: eski imajlarda `eta-optictouch-busy` adlı **ayrı** bir paket de var
+(`/usr/bin/eta-optictouch-busy` + wrapper). `eta-touchdrv`'ye ait değil, sürücü ya
+da sunucu taşımıyor; bu yüzden arşive alınmadı.
 
 ---
 
@@ -270,6 +351,20 @@ dokunmatik/araclar/upstream-ozet.sh /tmp/eta-touchdrv
 # 4) Manifesti yeniden üret
 python3 dokunmatik/araclar/manifest-uret.py
 ```
+
+Elinizde eski bir ETAP ISO'su / tahta imajı varsa, içinde arşivde olmayan bir
+ikili olup olmadığına şöyle bakılır (root gerekmez, ISO indirilmez):
+
+```bash
+dokunmatik/araclar/iso-tara.sh /yol/imaj.iso
+# ağ paylaşımındaki bir ISO da olur:
+gio mount smb://sunucu/paylasim
+dokunmatik/araclar/iso-tara.sh \
+    "/run/user/$(id -u)/gvfs/smb-share:server=sunucu,share=paylasim/imaj.iso"
+```
+
+Çıkan `bid=` (GNU Build ID) değeri karşılaştırmanın ölçüsüdür: dosya özetleri
+`dh_strip` yüzünden tutmayabilir, Build ID aynıysa program aynıdır.
 
 ---
 

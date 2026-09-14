@@ -2085,6 +2085,56 @@ def _t_aygit():
     return None, None
 
 
+def _t_tip_ayikla(secim):
+    """Kullanıcıdan gelen panel tipi girdisini normalleştir. -> tip | None"""
+    s = (secim or "").strip().lower().lstrip("-")
+    if s in ("otd", "4", "4k", "4kamera", "4-kamera", "otd/4"):
+        return "otd"
+    if s in ("optical", "optik", "2", "2k", "2kamera", "2-kamera", "optical/2"):
+        return "optical"
+    return None
+
+
+def _t_tip_coz(a, islem):
+    """Bu işlemin uygulanacağı panel tipini kesinleştir. -> (tip, kimlik|None)
+
+    Panel tipi yalnız bir etiket değil: hangi servis örneğinin (eta-touchdrv@otd
+    ↔ @optical) yeniden başlatılacağını, hangi sunucu ikilisinin değiştirileceğini
+    ve hangi aygıt düğümünün açılacağını belirler. Yanlış tip sessizce yanlış
+    donanıma müdahale demektir; bu yüzden asla varsayılmaz.
+
+    Sıra:  --tip  >  lsusb  >  kullanıcıya sor  >  hata."""
+    bulunan, kimlik = _t_aygit()
+    istenen = getattr(a, "tip", None)
+    if istenen:
+        if bulunan and bulunan != istenen:
+            warn(f"lsusb {bulunan} paneli gösteriyor ({kimlik}); "
+                 f"--tip {istenen} ile ezildi.")
+            kimlik = None
+        return istenen, kimlik
+    if bulunan:
+        return bulunan, kimlik
+
+    warn(f"Panel lsusb'de tanınmadı; {islem} hangi panel tipine uygulanacağı belirsiz.")
+    print(f"  {D('Yanlış tip yanlış servis örneğini başlatır ve yanlış sunucu')}")
+    print(f"  {D('ikilisini değiştirir; bu yüzden tip varsayılmıyor.')}")
+    if _TTY.isatty():
+        for _ in range(3):
+            try:
+                c = ask("  Panel tipi [1=OTD/4 kamera, 2=Optical/2 kamera, v=vazgeç]: ")
+            except EOFError:
+                break
+            if c.strip().lower() in ("v", "q", "vazgec", "vazgeç"):
+                die("Vazgeçildi.")
+            t = _t_tip_ayikla(c)
+            if t:
+                return t, None
+            print(f"  {Y('Geçersiz seçim.')}")
+    die("Panel tipi belirlenemedi. Açıkça verin:\n"
+        "    --tip otd       (2621 — 4 kameralı)\n"
+        "    --tip optical   (6615 — 2 kameralı)")
+
+
 def _t_kurulu():
     """Kurulu eta-touchdrv sürümü. -> str | None"""
     r = _t_run(["dpkg-query", "-W", "-f=${Version}", TOUCH_PKG])
@@ -2096,7 +2146,10 @@ def _t_servis(tip):
     """Bu sistemdeki dokunmatik servis biriminin adı.
 
     0.5.0+ şablon birim kullanır (eta-touchdrv@otd / @optical); daha eskiler tek
-    birim. Hangisinin kurulu olduğuna dosya sisteminden karar veririz."""
+    birim. Hangisinin kurulu olduğuna dosya sisteminden karar veririz.
+
+    tip=None yalnız salt-okunur yollarda (durum ekranı) geçerlidir ve @otd
+    varsayar; sisteme dokunan her çağrı tipi önce _t_tip_coz ile kesinleştirmeli."""
     for kok in ("/lib/systemd/system", "/usr/lib/systemd/system"):
         if os.path.exists(f"{kok}/{TOUCH_PKG}@.service"):
             return f"{TOUCH_PKG}@{tip or 'otd'}.service"
@@ -2307,15 +2360,24 @@ def _t_dkms_derlendi(surum):
 # --------------------------------------------------------------- komutlar
 def cmd_touch_durum(a):
     tip, kimlik = _t_aygit()
+    varsayildi = False
+    if not tip and getattr(a, "tip", None):
+        tip = a.tip
+    elif not tip:
+        # Salt-okunur ekran: hangi birime bakacağımızı bilmiyoruz, @otd varsayıp
+        # bunu açıkça söylüyoruz. Sisteme dokunan komutlar bu varsayımı yapmaz.
+        varsayildi = True
     surum = _t_kurulu()
     birim = _t_servis(tip)
     title("Dokunmatik — durum")
     if tip:
-        print(f"  Panel          : {G(kimlik)}  {D('(' + ('OTD / 4 kamera' if tip == 'otd' else 'Optical / 2 kamera') + ')')}")
+        print(f"  Panel          : {G(kimlik or '?')}  {D('(' + ('OTD / 4 kamera' if tip == 'otd' else 'Optical / 2 kamera') + ')')}"
+              + ("" if kimlik else D("  ← --tip ile verildi")))
     else:
         print(f"  Panel          : {Y('bulunamadı')}  {D('(lsusb bilinen kimlik göstermiyor)')}")
     print(f"  Kurulu sürüm   : {G(surum) if surum else Y('kurulu değil')}")
-    print(f"  Servis         : {Cy(birim)}  → {_t_servis_durum(birim)}")
+    print(f"  Servis         : {Cy(birim)}  → {_t_servis_durum(birim)}"
+          + (f"  {Y('← panel tanınmadı, @otd varsayıldı')}" if varsayildi else ""))
     yol = _t_sunucu_yolu(tip)
     if yol:
         with open(yol, "rb") as f:
@@ -2356,10 +2418,14 @@ def cmd_touch_liste(a):
         m = re.search(r"(\d{1,2}) (\w{3}) (\d{4})", s or "")
         return f"{m.group(3)}-{aylar.get(m.group(2), '??')}-{m.group(1):0>2}" if m else ""
 
+    tip, _ = _t_aygit()
+    if getattr(a, "tip", None):
+        tip = a.tip
     title("Dokunmatik — arşivdeki sürümler")
     print(f"  {D('sunucu/modül nesli aynı olan sürümler aynı sonucu verir; deneme sırası bunları atlar')}")
     print()
-    print("  " + D(f"{'sürüm':<13}{'tarih':<12}{'sun':<7}{'mod':<7}{'DKMS':<10}{'sınıf'}"))
+    print("  " + D(f"{'sürüm':<13}{'tarih':<12}{'4k sun':<8}{'4k mod':<8}"
+                   f"{'2k sun':<8}{'2k mod':<8}{'DKMS':<10}{'sınıf'}"))
     hr()
     for k in man["surumler"]:
         isaret = G("●") if k["surum"] == kurulu and k["sinif"] == "resmi" else " "
@@ -2369,10 +2435,20 @@ def cmd_touch_liste(a):
             dkms, boya = "şüpheli", Y
         else:
             dkms, boya = "—", D
-        print(f"{isaret} {k['surum']:<13}{_tarih(k.get('tarih')):<12}{k['sunucu_nesli']:<7}"
-              f"{k['modul_nesli']:<7}{boya(f'{dkms:<10}')}{D(k['sinif'])}")
+        # 2k sütunları eski manifestlerde yok; uzaktan inen sürüm eskiyse boş geç.
+        s4, m4 = k["sunucu_nesli"], k["modul_nesli"]
+        s2 = k.get("optik_sunucu_nesli", "?")
+        m2 = k.get("optik_modul_nesli", "?")
+        # Panel tipi biliniyorsa ilgisiz sütun çifti soluk gösterilir.
+        b4 = D if tip == "optical" else (lambda x: x)
+        b2 = D if tip == "otd" else (lambda x: x)
+        print(f"{isaret} {k['surum']:<13}{_tarih(k.get('tarih')):<12}"
+              f"{b4(f'{s4:<8}{m4:<8}')}{b2(f'{s2:<8}{m2:<8}')}"
+              f"{boya(f'{dkms:<10}')}{D(k['sinif'])}")
     hr()
     print(f"  {D('Deneme sırası:')} {' → '.join(man['deneme_sirasi'])}")
+    print(f"  {D('4k = OTD (2621, 4 kamera) · 2k = Optical (6615, 2 kamera); sütunlar o tarafın')}")
+    print(f"  {D('sunucu ve kernel modülü neslidir. Panel tipiniz hangisiyse o çifte bakın.')}")
     print(f"  {D('DKMS sütunu: modülün bu çekirdekte (' + platform.release() + ') derlenmesi bekleniyor mu.')}")
     return 0
 
@@ -2437,11 +2513,11 @@ def _t_uyumlu_mu(kayit, kurulu_kayit):
 def cmd_touch_dene(a):
     if _t_kok() is None:
         die("Bunun için 'sudo' gerekli.")
-    tip, kimlik = _t_aygit()
-    if not tip and not a.zorla:
+    if not _t_aygit()[0] and not a.zorla and not a.tip:
         die("Bilinen bir dokunmatik panel bulunamadı (lsusb).\n"
-            "    Panelin bağlı olduğundan eminseniz:  dokunmatik dene --zorla")
-    tip = tip or "otd"
+            "    Panelin bağlı olduğundan eminseniz:  dokunmatik dene --zorla\n"
+            "    veya tipi doğrudan verin:            dokunmatik dene --tip otd|optical")
+    tip, kimlik = _t_tip_coz(a, "Sürüm denemesi")
     man = _t_manifest(a.yerel)
     kurulu = _t_kurulu()
     kurulu_kayit = _t_kayit(man, kurulu) if kurulu else None
@@ -2609,9 +2685,9 @@ def cmd_touch_kalici(a):
     kayit = _t_kayit(man, a.surum)
     if not kayit:
         die(f"Arşivde böyle bir sürüm yok: {a.surum}   ('dokunmatik liste')")
-    tip, _ = _t_aygit()
+    tip, _ = _t_tip_coz(a, f"{a.surum} sürümünü kalıcılaştırmak")
     title(f"Dokunmatik — {a.surum} kalıcı hale getiriliyor")
-    return _t_kalicilastir(kayit, tip or "otd", a.yerel, kademe=2)
+    return _t_kalicilastir(kayit, tip, a.yerel, kademe=2)
 
 
 def cmd_touch_serbest(a):
@@ -2630,7 +2706,16 @@ def cmd_touch_geri(a):
     durum = _t_yedek_oku()
     if not durum:
         die(f"Yedek bulunamadı ({TOUCH_YEDEK}). Geri alınacak bir şey yok.")
-    tip = durum.get("tip") or "otd"
+    # Yedek kendi panel tipini taşır; geri yazılacak ikili o panele ait olduğu
+    # için kaynak odur. Kart değişmişse sessizce devam etmek yerine uyarıyoruz.
+    tip = getattr(a, "tip", None) or durum.get("tip")
+    if tip:
+        bulunan, kimlik = _t_aygit()
+        if bulunan and bulunan != tip:
+            warn(f"Yedek {tip} panelden alınmış, şu an takılı panel {bulunan} ({kimlik}).\n"
+                 f"    Geri alma {tip} için yapılacak; istediğiniz bu değilse:  --tip {bulunan}")
+    else:
+        tip, _ = _t_tip_coz(a, "Geri alma")
     title("Dokunmatik — başlangıç durumuna dönülüyor")
     print(f"  Hedef sürüm    : {G(str(durum.get('surum')))}")
     durum["yerel_kok"] = a.yerel
@@ -2866,9 +2951,7 @@ def _k_yazdir(anlik):
 def cmd_touch_kalib_oku(a):
     if _t_kok() is None:
         die("Bunun için 'sudo' gerekli.")
-    tip, _ = _t_aygit()
-    if not tip:
-        die("Bilinen bir dokunmatik panel bulunamadı (lsusb).")
+    tip, _ = _t_tip_coz(a, "Kalibrasyon okuma")
     title("Dokunmatik — kalibrasyon okunuyor")
     anlik = progress_timed("Cihazdan bloklar okunuyor",
                            lambda: _k_snapshot(tip, a.dene), est=3.0)
@@ -2935,9 +3018,7 @@ def cmd_touch_kalib_yaz(a):
     if not a.dosyalar:
         die("Kullanım: dokunmatik kalibrasyon yaz <anlik.json> --onayliyorum")
     anlik = _k_oku_dosya(a.dosyalar[0])
-    tip, kimlik = _t_aygit()
-    if not tip:
-        die("Bilinen bir dokunmatik panel bulunamadı (lsusb).")
+    tip, kimlik = _t_tip_coz(a, "Kalibrasyon yazma")
     yol = _k_aygit_yolu(tip)
     if not yol:
         die("Sürücünün aygıt düğümü yok; yazılamaz.  'dokunmatik durum' ile bakın.")
@@ -3012,9 +3093,7 @@ def cmd_touch_kalib_ham(a):
     """Tek bir komut/indeks çiftini elle sorgula — protokol keşfi için."""
     if _t_kok() is None:
         die("Bunun için 'sudo' gerekli.")
-    tip, _ = _t_aygit()
-    if not tip:
-        die("Bilinen bir dokunmatik panel bulunamadı (lsusb).")
+    tip, _ = _t_tip_coz(a, "Ham blok sorgusu")
     yol = _k_aygit_yolu(tip)
     if not yol:
         die("Sürücünün aygıt düğümü yok.")
@@ -3067,6 +3146,8 @@ def etatouch_main(argv):
         print("    --kademe 2   .deb'i tam kur (modül + sunucu; DKMS derler, yavaş)")
         print("    --surum X    sıradan bağımsız tek bir sürümü dene")
         print("    --yerel YOL  internet yerine yerel dokunmatik/ dizininden oku")
+        print("    --tip X      panel tipi: otd (2621, 4 kamera) | optical (6615, 2 kamera)")
+        print("                 lsusb panelinizi tanımıyorsa gerekli; algılamayı ezer")
         print("    --zorla      panel algılanamasa da devam et")
         print("    --cikti YOL  kalibrasyon anlık görüntüsünü buraya yaz")
         print("    --dene       OTD (2621) panelde doğrulanmamış komut kümesini dene")
@@ -3078,6 +3159,7 @@ def etatouch_main(argv):
         kademe = 1
         surum = None
         yerel = None
+        tip = None
         zorla = False
         cikti = None
         dene = False
@@ -3096,6 +3178,12 @@ def etatouch_main(argv):
             a.surum = next(it, None)
         elif p == "--yerel":
             a.yerel = next(it, None)
+        elif p == "--tip":
+            ham = next(it, None)
+            a.tip = _t_tip_ayikla(ham)
+            if not a.tip:
+                die(f"--tip yalnız 'otd' (2621 / 4 kamera) veya 'optical' "
+                    f"(6615 / 2 kamera) olabilir; verilen: {ham!r}")
         elif p == "--zorla":
             a.zorla = True
         elif p == "--cikti":

@@ -204,6 +204,10 @@ için kalibrasyon sorunlarında **hızlı** kademe hem doğru hem yeterlidir:
 
 - Paketler çalışma anında GitHub'dan indirilip **sha256 ile doğrulanır**. İnternetsiz
   ortamda `--yerel <depo>/dokunmatik` kullanın.
+- Panel tipi (OTD/4 kamera ↔ Optical/2 kamera) `lsusb` ile bulunur; hangi servis
+  örneğinin başlatılacağını ve hangi sunucu ikilisinin değiştirileceğini bu belirler.
+  Panel tanınmazsa araç **varsaymaz**: menüde sorar, betikte `--tip otd|optical`
+  bekler.
 - Başlangıç durumu yedeklenir; onay vermeden çıkarsanız otomatik geri yüklenir.
 - Onaylanan sürüm `apt-mark hold` + apt pin ile sabitlenir (yoksa otomatik güncelleme
   geri alır). Kaldırmak için `dokunmatik serbest`.

@@ -10,24 +10,24 @@
     "0.3.5",
     "0.3.2",
     "0.3.0",
-    "0.2.0",
-    "0.1.8"
+    "0.1.8",
+    "0.1.7"
   ],
   "surumler": [
     {
-      "surum": "0.1.8",
+      "surum": "0.1.7",
       "sinif": "resmi",
-      "koken": "yerel-arsiv",
-      "dosya": "paketler/eta-touchdrv_0.1.8_amd64.deb",
-      "boyut": 100334,
-      "sha256": "8bb36c763aa921f8db6135a4b860acb11679691129052ae196afbcfec52ac86d",
-      "tarih": "Mon, 30 Dec 2019 19:05:50 +0300",
-      "strip_edilmis": true,
+      "koken": "git-yeniden-paketleme",
+      "dosya": "paketler/eta-touchdrv_0.1.7_amd64.deb",
+      "boyut": 165680,
+      "sha256": "8b8bcdc31daa2f42955f60144514d6ccc2372d56bcb9956fc3fd4d0f22735029",
+      "tarih": "Fri, 14 Sep 2018 11:49:47 +0300",
+      "strip_edilmis": false,
       "upstream_blob": {
         "otd_sunucu": "2b5861ca6266fe38",
-        "otd_modul": "-",
-        "optik_sunucu": "-",
-        "optik_modul": "-"
+        "otd_modul": "513502ee8a57721e",
+        "optik_sunucu": "a9096af09f34cbef",
+        "optik_modul": "41ff9cf8b16abced"
       },
       "sunucu": [
         "OtdTouchServer",
@@ -44,12 +44,53 @@
         "touchdrv_install"
       ],
       "udev_sha256": "d9207b9eaf0172b9",
-      "not": "ETAP 19 oncesi; kernel modulu OtdTouchDriver.c, optik tarafta opticServer. Guncel cekirdekte DKMS derlemesi buyuk ihtimalle basarisiz olur.",
+      "not": "Pardus ETAP 5.2 ve 2019 tarihli tahta imajlarindan cikti; ETAP deposunda yok, upstream etiketinden paketlendi. Sunucu ikilileri 0.1.8 ile birebir AYNI; tek fark touch2 kernel modulu (optictouch.c). 0.1.8 bunu 'phase 1 ssd edition' icin hizlandirmis: COMMAND_RETRY_COUNT 10->8, msleep 200->50 ve acilistaki msleep 8000->300. Yavas/kararsiz 2 kameralali panellerde 0.1.7'nin sabirli zamanlamasi denenmeye deger. Guncel cekirdekte DKMS derlemesi beklenmez.",
       "kalibrasyon_esdegeri": [],
       "sunucu_nesli": "A",
-      "modul_nesli": "yok",
+      "modul_nesli": "M1",
+      "optik_sunucu_nesli": "a",
+      "optik_modul_nesli": "o1",
       "guncel_cekirdekte_derlenir": false,
-      "kademe1_uyumlu_modul": null
+      "kademe1_uyumlu_modul": "513502ee8a57721e"
+    },
+    {
+      "surum": "0.1.8",
+      "sinif": "resmi",
+      "koken": "yerel-arsiv",
+      "dosya": "paketler/eta-touchdrv_0.1.8_amd64.deb",
+      "boyut": 100334,
+      "sha256": "8bb36c763aa921f8db6135a4b860acb11679691129052ae196afbcfec52ac86d",
+      "tarih": "Mon, 30 Dec 2019 19:05:50 +0300",
+      "strip_edilmis": true,
+      "upstream_blob": {
+        "otd_sunucu": "2b5861ca6266fe38",
+        "otd_modul": "513502ee8a57721e",
+        "optik_sunucu": "a9096af09f34cbef",
+        "optik_modul": "026c40205ee38f1f"
+      },
+      "sunucu": [
+        "OtdTouchServer",
+        "opticServer"
+      ],
+      "modul_kaynagi": [
+        "OtdTouchDriver.c",
+        "optictouch.c"
+      ],
+      "servis": [
+        "eta-touchdrv.service"
+      ],
+      "baslatici": [
+        "touchdrv_install"
+      ],
+      "udev_sha256": "d9207b9eaf0172b9",
+      "not": "ETAP 19 oncesi; kernel modulu OtdTouchDriver.c, optik tarafta opticServer. Sunucularin ikisi de 0.1.7 ile ayni; 0.1.7'den tek farki hizlandirilmis touch2 modulu. Guncel cekirdekte DKMS derlemesi buyuk ihtimalle basarisiz olur.",
+      "kalibrasyon_esdegeri": [],
+      "sunucu_nesli": "A",
+      "modul_nesli": "M1",
+      "optik_sunucu_nesli": "a",
+      "optik_modul_nesli": "o2",
+      "guncel_cekirdekte_derlenir": false,
+      "kademe1_uyumlu_modul": "513502ee8a57721e"
     },
     {
       "surum": "0.2.0",
@@ -82,9 +123,13 @@
       ],
       "udev_sha256": "d9207b9eaf0172b9",
       "not": "OtdDrv.c'ye gecis. ETAP 19 icin guncellenen ilk surum.",
-      "kalibrasyon_esdegeri": [],
+      "kalibrasyon_esdegeri": [
+        "0.4.0~beta1"
+      ],
       "sunucu_nesli": "B",
-      "modul_nesli": "M1",
+      "modul_nesli": "M2",
+      "optik_sunucu_nesli": "b",
+      "optik_modul_nesli": "o3",
       "guncel_cekirdekte_derlenir": false,
       "kademe1_uyumlu_modul": "844eca6074da0f7b"
     },
@@ -121,7 +166,9 @@
       "not": "Cekirdek 5.10 uyumu, aygit kaydi duzeltmesi.",
       "kalibrasyon_esdegeri": [],
       "sunucu_nesli": "B",
-      "modul_nesli": "M2",
+      "modul_nesli": "M3",
+      "optik_sunucu_nesli": "b",
+      "optik_modul_nesli": "o4",
       "guncel_cekirdekte_derlenir": false,
       "kademe1_uyumlu_modul": "fa24c98856490244"
     },
@@ -160,7 +207,9 @@
         "0.3.2"
       ],
       "sunucu_nesli": "C",
-      "modul_nesli": "M3",
+      "modul_nesli": "M4",
+      "optik_sunucu_nesli": "b",
+      "optik_modul_nesli": "o4",
       "guncel_cekirdekte_derlenir": false,
       "kademe1_uyumlu_modul": "4678e40bd9ea2846"
     },
@@ -199,7 +248,9 @@
         "0.3.1"
       ],
       "sunucu_nesli": "C",
-      "modul_nesli": "M3",
+      "modul_nesli": "M4",
+      "optik_sunucu_nesli": "b",
+      "optik_modul_nesli": "o4",
       "guncel_cekirdekte_derlenir": false,
       "kademe1_uyumlu_modul": "4678e40bd9ea2846"
     },
@@ -239,7 +290,9 @@
         "0.3.5"
       ],
       "sunucu_nesli": "C",
-      "modul_nesli": "M4",
+      "modul_nesli": "M5",
+      "optik_sunucu_nesli": "b",
+      "optik_modul_nesli": "o5",
       "guncel_cekirdekte_derlenir": true,
       "kademe1_uyumlu_modul": "e95ddf7f011483ed"
     },
@@ -279,7 +332,9 @@
         "0.3.5"
       ],
       "sunucu_nesli": "C",
-      "modul_nesli": "M4",
+      "modul_nesli": "M5",
+      "optik_sunucu_nesli": "b",
+      "optik_modul_nesli": "o5",
       "guncel_cekirdekte_derlenir": true,
       "kademe1_uyumlu_modul": "e95ddf7f011483ed"
     },
@@ -320,7 +375,9 @@
         "0.3.4"
       ],
       "sunucu_nesli": "C",
-      "modul_nesli": "M4",
+      "modul_nesli": "M5",
+      "optik_sunucu_nesli": "b",
+      "optik_modul_nesli": "o5",
       "guncel_cekirdekte_derlenir": true,
       "kademe1_uyumlu_modul": "e95ddf7f011483ed"
     },
@@ -358,7 +415,9 @@
       "not": "Kernel kaynaklari + touch4 blob'u guncellendi. ETAP deposunda yayinlanmadi; yalnizca upstream git etiketinde var.",
       "kalibrasyon_esdegeri": [],
       "sunucu_nesli": "D",
-      "modul_nesli": "M5",
+      "modul_nesli": "M6",
+      "optik_sunucu_nesli": "b",
+      "optik_modul_nesli": "o5",
       "guncel_cekirdekte_derlenir": true,
       "kademe1_uyumlu_modul": "d349bb857badd283"
     },
@@ -372,7 +431,7 @@
       "tarih": "Mon, 21 Apr 2025 14:51:27 +0300",
       "strip_edilmis": true,
       "upstream_blob": {
-        "otd_sunucu": "tekil-beta1",
+        "otd_sunucu": "d3bd5abd382c9447",
         "otd_modul": "844eca6074da0f7b",
         "optik_sunucu": "98f8ee35b8cd7241",
         "optik_modul": "8e89e58e152799a4"
@@ -392,10 +451,14 @@
         "touchdrv_install"
       ],
       "udev_sha256": "d9207b9eaf0172b9",
-      "not": "Upstream'de karsiligi olmayan ara derleme; changelog kaydi yalnizca '* Test'. Kendine ozgu bir sunucu ikilisi tasiyor ama kernel kaynaklari 0.2.0 ile ayni (2020 tarihli). Aykiri deger; 6.12 cekirdeginde DKMS derlemesi beklenmiyor.",
-      "kalibrasyon_esdegeri": [],
-      "sunucu_nesli": "E",
-      "modul_nesli": "M1",
+      "not": "Upstream'de karsiligi olmayan ara derleme; changelog kaydi yalnizca '* Test'. Sunucu ikilisi de kernel kaynaklari da 0.2.0/0.3.0 ile ayni (sunucu yalnizca strip'lenmis; Build ID 77d9b032... esit). Denemeye deger yeni bir ikili tasimiyor; 6.12 cekirdeginde DKMS derlemesi de beklenmiyor.",
+      "kalibrasyon_esdegeri": [
+        "0.2.0"
+      ],
+      "sunucu_nesli": "B",
+      "modul_nesli": "M2",
+      "optik_sunucu_nesli": "b",
+      "optik_modul_nesli": "o3",
       "guncel_cekirdekte_derlenir": false,
       "kademe1_uyumlu_modul": "844eca6074da0f7b"
     },
@@ -432,8 +495,10 @@
       "udev_sha256": "c2aa61ffb4771f8a",
       "not": "Yeni nesil sunucu: --ellipse-backend / --verbose / --debug-touch-pipeline destegi ve ELLIPSE_FITTER, TOUCH_DEBUG_LOG ortam degiskenleri. ETAP deposunda yayinlanmadi.",
       "kalibrasyon_esdegeri": [],
-      "sunucu_nesli": "F",
-      "modul_nesli": "M5",
+      "sunucu_nesli": "E",
+      "modul_nesli": "M6",
+      "optik_sunucu_nesli": "b",
+      "optik_modul_nesli": "o5",
       "guncel_cekirdekte_derlenir": true,
       "kademe1_uyumlu_modul": "d349bb857badd283"
     },
@@ -471,8 +536,10 @@
       "kalibrasyon_esdegeri": [
         "0.5.1"
       ],
-      "sunucu_nesli": "G",
-      "modul_nesli": "M5",
+      "sunucu_nesli": "F",
+      "modul_nesli": "M6",
+      "optik_sunucu_nesli": "b",
+      "optik_modul_nesli": "o5",
       "guncel_cekirdekte_derlenir": true,
       "kademe1_uyumlu_modul": "d349bb857badd283"
     },
@@ -510,8 +577,10 @@
       "kalibrasyon_esdegeri": [
         "0.5.0"
       ],
-      "sunucu_nesli": "G",
-      "modul_nesli": "M5",
+      "sunucu_nesli": "F",
+      "modul_nesli": "M6",
+      "optik_sunucu_nesli": "b",
+      "optik_modul_nesli": "o5",
       "guncel_cekirdekte_derlenir": true,
       "kademe1_uyumlu_modul": "d349bb857badd283"
     },
@@ -549,6 +618,8 @@
       "kalibrasyon_esdegeri": [],
       "sunucu_nesli": "tekil",
       "modul_nesli": "tekil",
+      "optik_sunucu_nesli": "tekil",
+      "optik_modul_nesli": "tekil",
       "guncel_cekirdekte_derlenir": false,
       "kademe1_uyumlu_modul": null
     },
@@ -580,6 +651,8 @@
       "kalibrasyon_esdegeri": [],
       "sunucu_nesli": "tekil",
       "modul_nesli": "tekil",
+      "optik_sunucu_nesli": "tekil",
+      "optik_modul_nesli": "tekil",
       "guncel_cekirdekte_derlenir": false,
       "kademe1_uyumlu_modul": null
     },
@@ -611,6 +684,8 @@
       "kalibrasyon_esdegeri": [],
       "sunucu_nesli": "tekil",
       "modul_nesli": "tekil",
+      "optik_sunucu_nesli": "tekil",
+      "optik_modul_nesli": "tekil",
       "guncel_cekirdekte_derlenir": false,
       "kademe1_uyumlu_modul": null
     }
