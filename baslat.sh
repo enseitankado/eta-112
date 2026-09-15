@@ -1698,10 +1698,13 @@ def cmd_mac_check(a):
         return emit({"ok":ok,"mac":m,"oui":oui,"vendor":vendor,"reason":reason}, 0 if ok else 1)
     if ok:
         print(f"  {OK} {G('Geçerli Faz MAC')}: {Cy(m)}  {D('OUI '+oui+' — '+vendor)}")
+        print(D("     Bu adres 'mac set' tarafından kabul edilir. Doğrulama yalnız"))
+        print(D("     adresin kendisini sınar; tahtaya henüz hiçbir şey yazılmadı."))
         return 0
     print(f"  {ERR} {R('Geçersiz MAC')}: {a.mac}")
     if m: print(D("     normalize: %s%s"%(m, "  OUI "+oui if oui else "")))
     print(f"     {Y('neden: '+reason)}")
+    print(D("     Bu adres 'mac set' tarafından reddedilir; eFuse'a yazılmaz."))
     return 1
 
 # ----- MAC YAZMA: Realtek eFuse (rtnicpg) -----
@@ -1924,9 +1927,14 @@ def etamac_main(argv):
     if args and args[0] in ("-h","--help","yardim"):
         print(B("eta-112.py mac")+" — onboard ethernet MAC oku / doğrula / yaz")
         print("  eta-112.py mac read            # MAC(ler) + Faz OUI durumu (varsayılan)")
-        print("  eta-112.py mac check <MAC>     # önerilen MAC Faz'a ait mi? (biçim+OUI)")
+        print("  eta-112.py mac check <MAC>     # yazmadan önce sına: biçim, tür ve Faz OUI")
         print("  eta-112.py mac set <MAC> [-y]  # MAC'i Realtek eFuse'a YAZ (kalıcı, OS-bağımsız)")
         print("  eta-112.py mac [--json]        # makine-okur çıktı")
+        print(D("  check: salt-okunur ön kontrol — donanıma dokunmaz, root istemez, hiçbir şey"))
+        print(D("       yazmaz. 'set' aynı kontrolü zaten uygular; 'check' onu eFuse'a yazmadan"))
+        print(D("       önce görmenizi sağlar. Sınadığı şeyler: 12 hane biçimi; hepsi-sıfır /"))
+        print(D("       broadcast / multicast olmaması; yerel-yönetimli (rastgele) olmaması;"))
+        print(D("       OUI'nin bu modelin Faz beyaz listesinde bulunması."))
         print(D("  set: Faz OUI zorunlu; yazma geri-oku ile DOĞRULANIR; rtnicpg+pgdrv otomatik"))
         print(D("       indirilip derlenir. eFuse = OTP (tek-yönlü kalıcı): her değişiklik ~7 bayt"))
         print(D("       tüketir, GERİ ALINAMAZ; araç kaç değişiklik kaldığını gösterir. -y onaysız."))
@@ -2473,14 +2481,33 @@ def cmd_touch_liste(a):
         m = re.search(r"(\d{1,2}) (\w{3}) (\d{4})", s or "")
         return f"{m.group(3)}-{aylar.get(m.group(2), '??')}-{m.group(1):0>2}" if m else ""
 
+    def _lej(etiket, *satirlar):
+        """Tablo altı lejant satırı: solda sütun adı, sağda açıklaması.
+
+        Sütun adı 15 karakteri aşarsa (örn. 'bu çekirdekte derlenir mi?') kendi
+        satırında durur; açıklama her hâlde aynı kolondan hizalanır."""
+        girinti = " " * 4
+        bosluk = " " * 16
+        if len(etiket) <= 15:
+            print(f"{girinti}{Cy(f'{etiket:<16}')}{D(satirlar[0])}")
+            satirlar = satirlar[1:]
+        else:
+            print(f"{girinti}{Cy(etiket)}")
+        for x in satirlar:
+            print(f"{girinti}{bosluk}{D(x)}")
+
     tip, _ = _t_aygit()
     if getattr(a, "tip", None):
         tip = a.tip
     title("Dokunmatik — arşivdeki sürümler")
     print(f"  {D('sunucu/modül nesli aynı olan sürümler aynı sonucu verir; deneme sırası bunları atlar')}")
     print()
-    print("  " + D(f"{'sürüm':<13}{'tarih':<12}{'4k sun':<8}{'4k mod':<8}"
-                   f"{'2k sun':<8}{'2k mod':<8}{'DKMS':<10}{'sınıf'}"))
+    # İki satırlık başlık: üst satır sütunun neye ait olduğunu, alt satır neyi
+    # gösterdiğini söyler. sunucu/modül çiftleri panel tipine göre gruplanmıştır.
+    print("  " + D(f"{'':<13}{'':<12}{'OTD paneli':<16}{'Optical paneli':<16}"
+                   f"{'bu çekirdekte':<14}{'paket'}"))
+    print("  " + D(f"{'sürüm':<13}{'tarih':<12}{'sunucu':<8}{'modül':<8}"
+                   f"{'sunucu':<8}{'modül':<8}{'derlenir mi?':<14}{'sınıfı'}"))
     hr()
     for k in man["surumler"]:
         isaret = G("●") if k["surum"] == kurulu and k["sinif"] == "resmi" else " "
@@ -2489,7 +2516,7 @@ def cmd_touch_liste(a):
         elif yeni_cekirdek:
             dkms, boya = "şüpheli", Y
         else:
-            dkms, boya = "—", D
+            dkms, boya = "ilgisiz", D
         # 2k sütunları eski manifestlerde yok; uzaktan inen sürüm eskiyse boş geç.
         s4, m4 = k["sunucu_nesli"], k["modul_nesli"]
         s2 = k.get("optik_sunucu_nesli", "?")
@@ -2499,12 +2526,43 @@ def cmd_touch_liste(a):
         b2 = D if tip == "otd" else (lambda x: x)
         print(f"{isaret} {k['surum']:<13}{_tarih(k.get('tarih')):<12}"
               f"{b4(f'{s4:<8}{m4:<8}')}{b2(f'{s2:<8}{m2:<8}')}"
-              f"{boya(f'{dkms:<10}')}{D(k['sinif'])}")
+              f"{boya(f'{dkms:<14}')}{D(k['sinif'])}")
     hr()
     print(f"  {D('Deneme sırası:')} {' → '.join(man['deneme_sirasi'])}")
-    print(f"  {D('4k = OTD (2621, 4 kamera) · 2k = Optical (6615, 2 kamera); sütunlar o tarafın')}")
-    print(f"  {D('sunucu ve kernel modülü neslidir. Panel tipiniz hangisiyse o çifte bakın.')}")
-    print(f"  {D('DKMS sütunu: modülün bu çekirdekte (' + platform.release() + ') derlenmesi bekleniyor mu.')}")
+    print()
+    print(f"  {B('Sütunların anlamı')}")
+    _lej("sürüm",
+         "Arşivdeki paketin sürüm numarası. Satır başındaki ● şu an kurulu olan sürümdür.")
+    _lej("tarih",
+         "Sürümün upstream'de yayımlanma tarihi — bizim paketleme tarihimiz değil.")
+    _lej("OTD paneli",
+         "USB kimliği 2621 olan, 4 kameralı panele ait sunucu/modül sütun çifti.")
+    _lej("Optical paneli",
+         "USB kimliği 6615 olan, 2 kameralı panele ait sunucu/modül sütun çifti.",
+         "Panel tipiniz saptanmışsa ilgisiz olan çift soluk gösterilir; kendi",
+         "panelinizin çiftine bakın, diğerinin bu makinede hiçbir etkisi yoktur.")
+    _lej("  · sunucu",
+         "Kullanıcı alanında çalışan sunucu ikilisinin nesli: A, B, C …",
+         "Aynı harf = bayt bayt aynı program. Sürüm numaraları farklı ama harf",
+         "aynıysa dokunmatik davranışı birebir aynıdır; denemeye değmez.")
+    _lej("  · modül",
+         "Kernel modülünün nesli: OTD tarafında M1, M2 … / Optical tarafında o1, o2 …",
+         "Aynı etiket = aynı sürücü kaynağı, dolayısıyla aynı davranış.")
+    _lej("  · tekil",
+         "Bu paket hiçbir resmi nesle eşlenmiyor (varyant ya da üçüncü taraf).",
+         "Tek başına değerlendirilir; deneme sırası onu eşdeğer sayıp atlayamaz.")
+    _lej("bu çekirdekte derlenir mi?",
+         f"DKMS'in kernel modülünü şu an çalışan çekirdekte ({platform.release()})",
+         "derleyebilmesi bekleniyor mu:",
+         "evet     → derlenmesi bekleniyor; Kademe 2 (tam kurulum) denenebilir.",
+         "şüpheli  → çekirdeğiniz 6.8 veya üzeri, bu sürümün modül kaynağı ise daha",
+         "           eski; modül büyük olasılıkla derlenmez, Kademe 2 bu sürümü atlar.",
+         "           Kademe 1 (yalnız sunucu ikilisi) bundan etkilenmez, denenebilir.",
+         "ilgisiz  → çekirdeğiniz 6.8'den eski; bu ayrım sizin sisteminizde anlamsız.")
+    _lej("paket sınıfı",
+         "resmi        → ETAP/upstream kaynaklı, desteklenen paket.",
+         "varyant      → resmi bir sürümün değiştirilmiş kopyası.",
+         "ucuncu-taraf → dışarıdan derlenmiş, desteklenmeyen paket.")
     return 0
 
 
@@ -3659,13 +3717,59 @@ def _bios_temizle():
     return etabios_main(["clear", slot])
 
 
+def _mac_dogrula():
+    """Menüdeki 'MAC doğrula' adımı: önce ne işe yaradığını anlatır, sonra sorar.
+
+    Açıklama buraya konuldu çünkü adımın kendisi zararsız; asıl risk atlanmasında.
+    'MAC değiştir' adresi Realtek eFuse'una (OTP) yazar ve o yazım geri alınamaz;
+    bu adım o yazımdan önceki kuru denemedir."""
+    prof, _d = _mac_profile()
+    ouis = (prof or {}).get("mac_ouis")
+    title("MAC doğrula — yazmadan önce ön kontrol")
+    print("  " + D("Bu adım hiçbir şeyi değiştirmez. Girdiğiniz adresi donanıma"))
+    print("  " + D("dokunmadan, yalnızca kurallara göre sınar."))
+    print()
+    print("  " + D("Neye bakar:"))
+    for ad, ne in (
+        ("biçim",    "12 onaltılık hane mi — AA:BB:CC:DD:EE:FF"),
+        ("tür",      "hepsi-sıfır, broadcast ya da multicast değil mi; bu üçü"),
+        ("",         "bir ethernet kartına MAC olarak verilemez"),
+        ("köken",    "yerel-yönetimli (rastgele) bir adres değil, gerçek bir"),
+        ("",         "üretici OUI'si mi"),
+        ("sahiplik", "adresin ilk üç baytı (OUI) bu tahtanın Faz profilinde"),
+        ("",         "izin verilen üreticiye ait mi"),
+    ):
+        print("    " + (Cy(f"{ad:<11}") if ad else " " * 11) + D(ne))
+    print()
+    print("  " + D("Bu tahta: ") + (G(prof["model_name"]) if prof else Y("tanınmadı")))
+    if ouis:
+        print("  " + D("İzinli Faz OUI: ")
+              + ", ".join(f"{Cy(o)} {D('(' + v + ')')}" for o, v in ouis.items()))
+    else:
+        print("  " + Y("Bu model için OUI beyaz listesi tanımlı değil — sahiplik"))
+        print("  " + Y("kontrolü yapılamaz, her adres geçersiz sayılır."))
+    print()
+    print("  " + D("Neden gerekli: 'MAC değiştir' adımı adresi Realtek NIC'inin eFuse'una"))
+    print("  " + D("yazar. eFuse tek-yönlüdür (OTP): yazılan geri alınamaz ve her değişiklik"))
+    print("  " + D("yongadaki sınırlı alandan ~7 bayt tüketir. Yanlış bir adresi fark etmenin"))
+    print("  " + D("yeri yazdıktan sonrası değil, burasıdır."))
+    print()
+    mac = ask("  Doğrulanacak MAC: ").strip()
+    if not mac:
+        warn("MAC girilmedi — doğrulama yapılmadı.")
+        return 1
+    print()
+    return etamac_main(["check", mac])
+
+
 def _mac_menu():
     return _menu_dongusu("MAC adresi", [
-        ("MAC oku", "", lambda: etamac_main(["read"])),
-        ("MAC değiştir", "",
+        ("MAC oku", "güncel adresler ve Faz OUI durumu",
+         lambda: etamac_main(["read"])),
+        ("MAC değiştir", "eFuse'a kalıcı yazar — geri alınamaz",
          lambda: etamac_main(["set", ask("  Yeni MAC: ").strip()])),
-        ("Bir MAC'i doğrula", "",
-         lambda: etamac_main(["check", ask("  Doğrulanacak MAC: ").strip()])),
+        ("MAC doğrula", "yazmadan önce sına — donanıma dokunmaz",
+         _mac_dogrula),
         ("Geri", "", None),
     ])
 
