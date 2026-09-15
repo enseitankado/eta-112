@@ -46,6 +46,7 @@ import shutil
 import tempfile
 import subprocess
 import atexit
+import threading    # die() ana iş parçacığında mı diye bakar; aşağıda yeniden import edilir
 import warnings
 
 # crypt modülü 3.11+ DeprecationWarning üretir; kullanıcıya gürültü olmasın.
@@ -96,7 +97,25 @@ def warn(m):  print(f"  {C.YL}!{C.R} {m}")
 def err(m):   print(f"  {C.RD}✗{C.R} {m}", file=sys.stderr)
 
 
+class _Die(SystemExit):
+    """die() bir yan iş parçacığından çağrıldığında kullanılan taşıyıcı.
+
+    Mesajı hemen basmayız: ilerleme çubuğu aynı satırı 10 Hz'de yeniden çizdiği
+    için stderr'e yazılan satır anında eziliyordu. Mesaj burada taşınır ve ana
+    iş parçacığında, çubuk temizlendikten sonra basılır."""
+    def __init__(self, mesaj, code=1):
+        super().__init__(code)
+        self.mesaj = mesaj
+
+
 def die(m, code=1):
+    # SystemExit bir BaseException'dir; 'except Exception' onu yakalamaz. Bir yan
+    # iş parçacığında sessizce o parçacığı sonlandırır ve çağıran, işin başarılı
+    # olduğunu sanıp None ile devam eder. Bu yüzden ana iş parçacığı dışında
+    # mesajı taşıyan _Die fırlatılır; progress_timed onu ana parçacıkta yeniden
+    # fırlatır.
+    if threading.current_thread() is not threading.main_thread():
+        raise _Die(m, code)
     err(m)
     sys.exit(code)
 
@@ -824,8 +843,12 @@ def progress_timed(label, fn, est=30.0):
         print(f"  {label}...", flush=True); return fn()
     box={}
     def w():
+        # BaseException — 'except Exception' SystemExit'i (die()) ve
+        # KeyboardInterrupt'i yakalamaz; yakalanmazsa bu parçacık sessizce ölür,
+        # box boş kalır ve çağıran None alıp 'NoneType is not subscriptable' ile
+        # çöker. Ne gelirse gelsin kutuya koyup ana parçacıkta yeniden fırlatıyoruz.
         try: box["r"]=fn()
-        except Exception as e: box["e"]=e
+        except BaseException as e: box["e"]=e
     th=threading.Thread(target=w); th.start()
     W=28; t0=time.time()
     while th.is_alive():
@@ -835,8 +858,13 @@ def progress_timed(label, fn, est=30.0):
         sys.stdout.write(f"\r  {Cy(label)} [{bar}] {int(frac*100):3d}%{extra} "); sys.stdout.flush()
         time.sleep(0.1)
     th.join()
+    if "e" in box:
+        # Başarısız işe '100% ✓' basma; satırı temizle ki hata mesajı okunabilsin.
+        sys.stdout.write("\r\033[K"); sys.stdout.flush()
+        e=box["e"]
+        if isinstance(e, _Die): err(e.mesaj)      # die()'nin mesajı burada basılır
+        raise e
     sys.stdout.write(f"\r  {Cy(label)} [{G('█'*W)}] 100% {OK} {D(f'{time.time()-t0:.0f}s')}            \n"); sys.stdout.flush()
-    if "e" in box: raise box["e"]
     return box.get("r")
 
 def run_msg(msg, fn):
@@ -3625,6 +3653,25 @@ def _wkey_menu():
     ])
 
 
+def _touch_kalib_oku():
+    """Menüden kalibrasyon okuma.
+
+    OTD (2621) panellerde komut kimlikleri doğrulanmadığı için komut satırı
+    --dene ister. Menüde bayrak yazılamaz; aynı onayı soruyla alıyoruz. Okuma
+    salt GET kontrol transferidir — panele yazılmaz; risk veri kaybı değil,
+    çıktının anlamsız olmasıdır."""
+    argv = ["kalibrasyon", "oku"]
+    tip, kimlik = _t_aygit()
+    if tip == "otd":
+        warn(f"OTD paneli ({kimlik}) — bu panel tipinde komut kimlikleri doğrulanmadı.")
+        print(f"  {D('Okuma panele yazmaz, yalnızca sorar; ancak Optical komut kümesi')}")
+        print(f"  {D('denendiği için bloklar anlamsız veya boş çıkabilir.')}")
+        if ask("  Yine de denensin mi? [e/H]: ").strip().lower() not in ("e", "evet", "y"):
+            return 0
+        argv.append("--dene")
+    return etatouch_main(argv)
+
+
 def _touch_kalib_karsilastir():
     x = ask("  Birinci kayıt (sağlam tahta): ").strip()
     y = ask("  İkinci kayıt (sorunlu tahta): ").strip()
@@ -3637,7 +3684,7 @@ def _touch_menu():
         ("Sürümleri listele", "", lambda: etatouch_main(["liste"])),
         ("Sürüm dene — hızlı", "", lambda: etatouch_main(["dene", "--kademe", "1"])),
         ("Sürüm dene — tam", "", lambda: etatouch_main(["dene", "--kademe", "2"])),
-        ("Kalibrasyonu oku", "", lambda: etatouch_main(["kalibrasyon", "oku"])),
+        ("Kalibrasyonu oku", "", _touch_kalib_oku),
         ("Kalibrasyon karşılaştır", "", _touch_kalib_karsilastir),
         ("Başlangıç durumuna dön", "", lambda: etatouch_main(["geri"])),
         ("Sabitlemeyi kaldır", "", lambda: etatouch_main(["serbest"])),
