@@ -19,7 +19,8 @@ dayanan hiçbir şey sessizce kullanılmıyor.
 | OTD komut haritası | `OtdTouchServer` dinamik sembolleri + söküm | **Kesin** |
 | OTD depolama/kayıt düzeni | `GetStorageBlock` @`0x3b9f`, `readRecord` @`0x131cd` | **Kesin** |
 | OTD blok içeriğinin **anlamı** | — | **Kısmen** (bkz. 6.6) |
-| OTD **yazma/silme** komutları | `SetStorageBlock`, `EraseStorage` — adresleri bilinir | **Kullanılmıyor** (bilerek) |
+| OTD **blok yazma** komutu | `SetStorageBlock` `0xb2`/n=36 — adres bilinir | **Yük düzeni varsayım** (bkz. 7) |
+| OTD **silme** komutu | `EraseStorage` `0xb1` — adres bilinir | **Kullanılmıyor** (bilerek) |
 
 Sökme işlemi `eta-touchdrv 0.3.6~tbt1` paketindeki `OpticalService` ikilisi
 üzerinde yapıldı; o sürüm sembol tablosunu taşıyor (`packageBuild`, `getCommand`,
@@ -289,6 +290,76 @@ Avcı üst üste binen `float32` alanlarında yanlış pozitif verebilir (ör. o
 
 ---
 
+## 7. OTD blok yazma — no-op ile doğrulanabilir varsayım
+
+Okuma çözüldüğü için geri yazma için içeriğin **anlamını** bilmek gerekmiyor:
+32 baytlık bloklar okundukları gibi geri konabilir. Eksik olan tek şey yazma
+komutunun yük düzeni.
+
+### 7.1 Varsayım
+
+```
+    b1 = 0x2d · komut = 0xb2 · n = 36
+    yük = uint16(blok_no // bölen) + uint16(blok_no % bölen) + 32 bayt veri
+```
+
+Dayanağı **okuma yolunun simetrisi**: aynı komut kimliği (`0xb2`) okumada n=4
+ile yalnız adresi taşıyor; yazmada n=36 ile aynı adres + bir blok (`0xb0`
+bölüm bilgisi blok boyunu 32 bildiriyor, `4 + 32 = 36`). Sökümdeki çağrı için
+daha önce "9 × float32" yorumu düşülmüştü; 4+32 bölünmesi adresleme
+simetrisiyle daha tutarlı, ama **cihazda doğrulanması gerekiyor**.
+
+### 7.2 No-op testi — `kalibrasyon yazma-testi`
+
+Varsayımı brick riski almadan sınamanın yolu, bir bloğu **kendi okunan
+değeriyle** yazmak:
+
+- Hücre NOR flash olup silme gerektirse bile içerik değişmez: `x & x = x`.
+  (Bölüm 0'da blok 4+ tamamen `0xFF` ölçüldü — silinmiş flash; varsayılan test
+  bloğu 4 bu yüzden en zararsız hedef.)
+- Geriye tek risk kalır: **adres düzeni yanlışsa yazma başka bloğa gider.**
+  Test bunu, yazmadan önce ve sonra aynı blok penceresini dökerek yakalar.
+
+Akış: bölüm bilgisi → pencere dökümü (referans) → bloğu oku → aynı baytları
+yaz → bloğu geri oku → pencereyi yeniden dök → karşılaştır.
+
+Üç ayrı sonuç, üçü de güvenli:
+
+| Sonuç | Anlamı | Veri |
+|---|---|---|
+| ACK + içerik aynı + yan etki yok | yük düzeni **doğrulandı** | değişmedi |
+| STALL / bilinmeyen durum | panel bu komutu tanımıyor | değişmedi |
+| başka blok değişti | adres düzeni **yanlış** | referans döküm dosyada |
+
+Kıyas penceresi varsayılan 64 blok. Bölüm 4096 blok bildiriyor ve her blok bir
+SET+GET+2×50 ms demek — tam döküm ~7 dakika; kayıtlar ilk ~48 blokta yaşadığı
+ve yanlış adresleme yakın bir bloğa düştüğü için bu pencere yeterli
+(`--blok-sayisi` ile büyütülebilir).
+
+### 7.3 Geri yükleme — `kalibrasyon depo-yaz`
+
+`depo` dökümünü (ham 32 baytlık bloklar) cihaza geri yazar. Sınırlar:
+
+- yalnız OTD; panel tipi ve dosya biçimi doğrulanır,
+- **blok 0 (ASCII seri / ProductKey) varsayılan olarak atlanır** — başka
+  panelin kimliğini yazmamak için; `--seri-dahil` ile açılır,
+- yazmadan önce hedefin dökümü otomatik yedeklenir,
+- hedefte zaten aynı olan blok yazılmaz,
+- her blok yazıldıktan sonra **geri okunup doğrulanır**; ilk uyuşmazlıkta
+  durulur, kalan bloklara dokunulmaz,
+- `--onayliyorum` + ayrıca `yaz` teyidi ister.
+
+`0xb1` (silme) bu yola da konulmadı. Yazma erase gerektiriyorsa no-op testi
+bunu "kabul edildi ama içerik bozuldu" olarak bildirir.
+
+> **Kalibrasyon panele özgüdür.** Kamera konumu, cam kalınlığı ve montaj
+> toleransı her tahtada farklı; başka panelin blokları doğru hizalama vermez.
+> Bu yol bir **kurtarma** adımıdır (bloklar `00`/`0xFF` ise sürücü sessizce
+> `OptSetCalibParaDefault`'a düşmüştür), kalıcı çözüm değil — ardından panelin
+> kendi kalibrasyon aracıyla yeniden kalibre edilmeli.
+
+---
+
 ## Kullanım
 
 ```bash
@@ -320,6 +391,19 @@ sudo eta-112.py dokunmatik kalibrasyon tara
 
 # Ham depolama dökümü — kayıt sınırlarını görmek için
 sudo eta-112.py dokunmatik kalibrasyon depo --bolum 0x80 --blok 0 --blok-sayisi 48
+```
+
+Blok yazma yolu (7. bölüm) — önce sına, sonra geri yükle:
+
+```bash
+# 1) Yük düzeni varsayımını cihazda sına (hiçbir bayt değişmez)
+sudo eta-112.py dokunmatik kalibrasyon yazma-testi --onayliyorum
+
+# 2) Sağlam tahtanın ham blok dökümünü al
+sudo eta-112.py dokunmatik kalibrasyon depo --bolum 0x80 --tam --cikti saglam-ccb.json
+
+# 3) Arızalı tahtaya geri yaz (seri bloğu atlanır, her blok geri okunup doğrulanır)
+sudo eta-112.py dokunmatik kalibrasyon depo-yaz saglam-ccb.json --onayliyorum
 ```
 
 `oku` sırasında sunucu servisi geçici olarak durdurulur (cihazı sürekli okuduğu

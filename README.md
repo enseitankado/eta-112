@@ -235,6 +235,21 @@ yalnızca aynı panelden alınmış bir yedeği geri yüklemek içindir; `--onay
 otomatik yedek ve ayrı teyit ister, OTD (`2621:*`) panellerde kapalıdır. Kesinlik
 dökümü: [`dokunmatik/belgeler/kalibrasyon-protokolu.md`](dokunmatik/belgeler/kalibrasyon-protokolu.md)
 
+OTD (`2621:*`) panellerde ham blok yedeği alınıp geri yüklenebilir. Yazma yükünün
+düzeni varsayıma dayandığı için önce **no-op testi** ile sınanır — bir blok kendi
+değeriyle yazılır, hiçbir bayt değişmez (`x & x = x`), yanlış adresleme yazmadan
+önce/sonra dökülen pencere karşılaştırılarak yakalanır:
+
+```bash
+sudo eta-112.py dokunmatik kalibrasyon yazma-testi --onayliyorum            # sına
+sudo eta-112.py dokunmatik kalibrasyon depo --bolum 0x80 --tam --cikti ccb.json
+sudo eta-112.py dokunmatik kalibrasyon depo-yaz ccb.json --onayliyorum      # geri yaz
+```
+
+Geri yükleme blok 0'ı (seri / `ProductKey`) atlar, yazmadan önce hedefi yedekler ve
+her bloğu geri okuyup doğrular. Kalibrasyon panele özgü olduğu için bu bir
+**kurtarma** adımıdır; ardından panelin kendi aracıyla yeniden kalibre edilmeli.
+
 ---
 
 ## Notlar

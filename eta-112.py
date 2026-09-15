@@ -2966,9 +2966,40 @@ KALIB_OTD_BLOKLAR = tuple(
 # uint16(blok_no % bolen)  -- sokumdeki 'divw 0x4(%r8)' tam olarak bu.
 KALIB_OTD_BOLUM_BILGI = 0xb0
 KALIB_OTD_BLOK_OKU = 0xb2
-KALIB_OTD_BLOK_YAZ = 0xb2       # n=36 ile; bu arac yazmiyor
+KALIB_OTD_BLOK_YAZ = 0xb2       # n=36 ile; yalniz 'yazma-testi' / 'depo-yaz'
 KALIB_OTD_SIL = 0xb1            # ASLA gonderilmez
 KALIB_OTD_TEHLIKELI = (0xb1, 0xb2)
+
+# ---- OTD blok yazma --------------------------------------------------------
+# Yuk duzeni VARSAYIM: 4 bayt blok adresi + 32 bayt veri = 36.
+# Dayanagi, okuma yolunun simetrisi -- ayni komut kimligi (0xb2) okumada n=4
+# ile YALNIZ adres tasiyor; yazmada n=36 ile ayni adres + bir blok (blok boyu
+# bolum bilgisinde 32 olarak bildiriliyor). Ikilinin 0x2d/0xb2/n=36 cagrisi
+# icin yorum satirinda "9 x float32" yaziyordu; 4+32 bolunmesi adresleme
+# simetrisiyle daha tutarli, ama DOGRULANMASI gerekiyor -- 'yazma-testi'
+# komutu tam bunu yapar.
+#
+# NEDEN NO-OP YAZMA BRICK YAPMAZ: bir blogu KENDI okunan degeriyle yazmak,
+# hucre NOR flash olup silme gerektirse bile icerigi degistirmez (x & x = x).
+# Geriye tek risk kalir: adres duzeni yanlissa yazma BASKA bir bloga gider.
+# 'yazma-testi' bunu, yazmadan once ve sonra bolumun TAMAMINI dokup
+# karsilastirarak yakalar.
+KALIB_OTD_YAZ_B1 = 0x2d         # sunucuda 0xb2/n=36 cagrisinin [1] bayti
+KALIB_OTD_YAZ_YUK = 36          # 4 bayt adres + 32 bayt veri
+KALIB_OTD_BLOK_BOYU = 32
+KALIB_OTD_SERI_BLOK = 0         # her bolumde blok 0 = ASCII seri / ProductKey
+# FCB kayit tablosunda kullanilan bloklar: 0 (seri) + 1..3 (kamera-parametre,
+# 82 bayt -> 31+32+32). Ilk kullanilmayan blok 4; 'yazma-testi' varsayilan
+# olarak onu secer, boylece bir hata bile gercek kalibrasyon verisine dokunmaz.
+# Cihazda olculdu (kalibrasyon-protokolu.md 6.6): blok 4+ tamamen 0xFF, yani
+# silinmis flash -- test icin en zararsiz hedef.
+KALIB_OTD_TEST_BLOK = 4
+
+# Bolum 4096 blok bildiriyor (olculdu) ve her blok bir SET+GET+2x50 ms demek:
+# tam dokum ~7 dakika. Yan etki kontrolu icin bu gereksiz -- kayitlar ilk
+# ~48 blokta yasiyor ve yanlis adresleme yakin bir bloga duser. Bu yuzden
+# kiyas penceresi varsayilan olarak bu kadar; --blok-sayisi ile buyutulebilir.
+KALIB_OTD_KIYAS_PENCERE = 64
 
 
 def _k_otd_bolum_coz(yuk):
@@ -3035,6 +3066,41 @@ def _k_otd_blok_oku(fd, bolum, blok_no, bolen):
         raise OSError("bölüm bilgisi bölen alanı 0; blok adresi hesaplanamaz")
     yuk = struct.pack("<HH", blok_no // bolen, blok_no % bolen)
     return _k_oku_blok_otd(fd, 0x1e, bolum, KALIB_OTD_BLOK_OKU, yuk)
+
+
+def _k_otd_blok_yaz(fd, bolum, blok_no, veri, bolen):
+    """SetStorageBlock (0xb2, n=36) ile tek blok yaz. -> (veri|None, ham, durum)
+
+    Yuk duzeni varsayim (bkz. yukaridaki not): okuma ile ayni 4 baytlik adres,
+    ardindan 32 baytlik blok. Cagiran yazma sonrasi MUTLAKA geri okuyup
+    dogrulamali; bu fonksiyon yalnizca paketi gonderir."""
+    if not bolen:
+        raise OSError("bölüm bilgisi bölen alanı 0; blok adresi hesaplanamaz")
+    if len(veri) != KALIB_OTD_BLOK_BOYU:
+        raise ValueError(f"blok verisi tam {KALIB_OTD_BLOK_BOYU} bayt olmalı "
+                         f"({len(veri)} verildi)")
+    yuk = struct.pack("<HH", blok_no // bolen, blok_no % bolen) + bytes(veri)
+    if len(yuk) != KALIB_OTD_YAZ_YUK:                       # duzen bozulduysa gonderme
+        raise ValueError(f"yazma yükü {KALIB_OTD_YAZ_YUK} bayt olmalı ({len(yuk)})")
+    return _k_oku_blok_otd(fd, KALIB_OTD_YAZ_B1, bolum, KALIB_OTD_BLOK_YAZ, yuk)
+
+
+def _k_otd_bolum_dok(fd, bolum, bilgi, bas=0, adet=None):
+    """Bolumun ham bloklarini sirayla oku. -> {blok_no: bytes}
+
+    Yazma oncesi/sonrasi kiyas icin kullanilir: eksik okunan blok atlanir,
+    boylece tek bir STALL tum dokumu dusurmez."""
+    son = bilgi["toplam_blok"] if adet is None else min(
+        bilgi["toplam_blok"], bas + adet)
+    goruntu = {}
+    for n in range(bas, son):
+        try:
+            v, _ham, _d = _k_otd_blok_oku(fd, bolum, n, bilgi["bolen"])
+        except OSError:
+            continue
+        if v is not None and len(v) == KALIB_OTD_BLOK_BOYU:
+            goruntu[n] = v
+    return goruntu
 
 
 def _k_paket_kur_otd(b1, indeks, komut, yuk=b""):
@@ -3282,6 +3348,40 @@ def _k_oku_dosya(yol):
     return a
 
 
+def _k_oku_dosya_depo(yol):
+    """'depo' ciktisini oku ve bicimini dogrula. -> dict
+
+    'yazma-testi' ciktisi da kabul edilir: onun 'referans' alani ayni bolumun
+    tam dokumunu tasir, yani bir yan etkiyi geri almak icin dogrudan
+    kullanilabilir."""
+    try:
+        with open(yol, encoding="utf-8") as f:
+            a = json.load(f)
+    except (OSError, ValueError) as e:
+        die(f"{yol}: okunamadı ({e})")
+    aile = a.get("bicim", "").split("/")[0]
+    if aile == "eta-112-dokunmatik-yazma-testi":
+        ref = a.get("referans") or {}
+        if not ref:
+            die(f"{yol}: yazma testi çıktısında referans döküm yok.")
+        a = {"bicim": "eta-112-dokunmatik-depo/1", "tarih": a.get("tarih", ""),
+             "panel": a.get("panel", {}), "surucu": a.get("surucu"),
+             "makine": a.get("makine"),
+             "bolumler": [{"bolum": a.get("bolum", 0),
+                           "bilgi": a.get("bolum_bilgisi") or {},
+                           "bloklar": [{"no": int(n), "veri": v}
+                                       for n, v in sorted(ref.items(),
+                                                          key=lambda kv: int(kv[0]))]}]}
+        aile = "eta-112-dokunmatik-depo"
+    if aile != "eta-112-dokunmatik-depo":
+        die(f"{yol}: bu bir 'depo' dökümü değil.\n"
+            "    Blok geri yükleme ham blok dökümü ister:  "
+            "dokunmatik kalibrasyon depo --tam --cikti <dosya>")
+    if not a.get("bolumler"):
+        die(f"{yol}: dökümde hiç bölüm yok.")
+    return a
+
+
 def _k_stall_mi(b):
     """Blok kaydi USB STALL ile mi bitti? (EPIPE -> 'Broken pipe')"""
     return "hata" in b and ("Errno 32" in b["hata"] or "Broken pipe" in b["hata"])
@@ -3526,8 +3626,13 @@ def cmd_touch_kalib_depo(a):
     title("Dokunmatik — OTD depolama")
     print(f"  Panel          : {G(kimlik or '?')}  {D(tip)}  {D(yol)}")
     print(f"  Bölümler       : {Cy(', '.join(str(b) for b in bolumler))}")
-    print(f"  Blok           : {Cy('%d..%d' % (a.blok, a.blok + a.blok_sayisi - 1))}")
+    print(f"  Blok           : "
+          + (Cy("%d..son" % a.blok) if a.tam
+             else Cy("%d..%d" % (a.blok, a.blok + a.blok_sayisi - 1))))
     print(f"  {D('Yalnızca okuma komutları gönderilir (0xb0, 0xb2/n=4).')}")
+    if a.tam:
+        print(f"  {WARN} {Y('--tam: bölüm 4096 blok bildiriyor; her blok ~100 ms')}")
+        print(f"     {Y('→ bölüm başına ~7 dakika sürebilir.')}")
     hr()
 
     birim, calisiyordu = _k_servis_durdur(tip)
@@ -3553,7 +3658,10 @@ def cmd_touch_kalib_depo(a):
                       f"{D('bölen')} {bilgi['bolen']}  "
                       f"{D('blok boyu')} {bilgi['blok_boyu']}")
                 kayit = {"bolum": bolum, "bilgi": bilgi, "bloklar": []}
-                for n in range(a.blok, a.blok + a.blok_sayisi):
+                # --tam: bolumun bildirdigi son bloga kadar (geri yukleme icin
+                # gereken tam goruntu; varsayilan kisa pencere degismedi).
+                adet = (bilgi["toplam_blok"] - a.blok) if a.tam else a.blok_sayisi
+                for n in range(a.blok, a.blok + max(0, adet)):
                     if n >= bilgi["toplam_blok"]:
                         break
                     try:
@@ -3763,6 +3871,335 @@ def cmd_touch_kalib_ham(a):
     return 0
 
 
+def _k_otd_yaz_hazirla(a, islem):
+    """OTD yazma komutlarinin ortak on kosullari. -> (tip, kimlik, yol)"""
+    if _t_kok() is None:
+        die("Bunun için 'sudo' gerekli.")
+    tip, kimlik = _t_tip_coz(a, islem)
+    if tip != "otd":
+        die("Bu komut OTD (2621) panellere özgüdür.\n"
+            "    Optical (6615) tarafında blok yazma yolu yok; "
+            "orada 'kalibrasyon yaz' kullanılır.")
+    yol = _k_aygit_yolu(tip)
+    if not yol:
+        die("Sürücünün aygıt düğümü yok.  'dokunmatik durum' ile bakın.")
+    return tip, kimlik, yol
+
+
+def _k_otd_bolum_bilgi_al(fd, bolum):
+    """0xb0 ile bolum bilgisi; cozulemezse die. -> dict"""
+    yuk, ham, durum = _k_oku_blok_otd(fd, 0x1e, bolum, KALIB_OTD_BOLUM_BILGI)
+    bilgi = _k_otd_bolum_coz(yuk)
+    if not bilgi:
+        die(f"bölüm {bolum}: bilgi okunamadı (durum 0x{durum:02x}, "
+            f"{ham[:12].hex(' ')})")
+    if bilgi["blok_boyu"] != KALIB_OTD_BLOK_BOYU:
+        die(f"bölüm {bolum}: blok boyu {bilgi['blok_boyu']} bayt, "
+            f"{KALIB_OTD_BLOK_BOYU} bekleniyordu — yazma yükü düzeni geçersiz.")
+    return bilgi
+
+
+def cmd_touch_kalib_yazma_testi(a):
+    """No-op yazma dogrulamasi -- icerigi DEGISTIRMEDEN yazma yolunu olcer.
+
+    Yazma komutu (0xb2/n=36, b1=0x2d) ve varsayilan yuk duzeni (4 bayt adres +
+    32 bayt veri) cihazda gecerli mi? Bunu olcmenin brick'siz yolu, bir blogu
+    KENDI okunan degeriyle yazmak: NOR flash olup silme gerekse bile icerik
+    degismez (x & x = x). Geriye kalan tek risk yanlis adreslemedir; onu da
+    yazmadan once/sonra bolumun tamamini dokup karsilastirarak yakalariz.
+
+    Adimlar:  bolum bilgisi -> tam dokum (referans) -> blogu oku -> ayni
+    baytlari yaz -> blogu geri oku -> tam dokumu yenile -> kiyasla."""
+    tip, kimlik, yol = _k_otd_yaz_hazirla(a, "Yazma testi")
+    bolum = a.bolum if a.bolum is not None else 0
+    blok = a.blok if a.blok else KALIB_OTD_TEST_BLOK
+
+    title("Dokunmatik — OTD yazma yolu testi (no-op)")
+    print(f"  Panel          : {G(kimlik or '?')}  {D(tip)}  {D(yol)}")
+    print(f"  Bölüm / blok   : {Cy(str(bolum))} / {Cy(str(blok))}")
+    print(f"  {D('Blok kendi değeriyle yazılır; hiçbir bayt değişmez.')}")
+    print(f"  {D('Kalibrasyon kayıtları bölüm 0 blok 0-3; varsayılan test bloğu 4.')}")
+    if blok <= 3:
+        warn(f"Blok {blok} kayıt tablosunda kullanılıyor (0=seri, 1-3=kamera "
+             "parametresi). Test için kullanılmayan bir blok daha güvenlidir.")
+    if not a.onayliyorum:
+        die("Yazma komutu gönderilecek (içerik değişmese de). Onaylayın:  --onayliyorum")
+    hr()
+
+    birim, calisiyordu = _k_servis_durdur(tip)
+    sonuc = {"bicim": "eta-112-dokunmatik-yazma-testi/1",
+             "tarih": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+             "panel": {"tip": tip, "usb": kimlik, "aygit": yol},
+             "surucu": _t_kurulu(), "makine": platform.node(),
+             "bolum": bolum, "blok": blok}
+    try:
+        fd = os.open(yol, os.O_RDWR)
+        try:
+            bilgi = _k_otd_bolum_bilgi_al(fd, bolum)
+            sonuc["bolum_bilgisi"] = bilgi
+            print(f"  {D('bölüm bilgisi:')} toplam blok {bilgi['toplam_blok']}  "
+                  f"bölen {bilgi['bolen']}  blok boyu {bilgi['blok_boyu']}")
+            if blok >= bilgi["toplam_blok"]:
+                die(f"blok {blok}, bölümün {bilgi['toplam_blok']} bloğu dışında.")
+
+            pencere = (a.blok_sayisi if a.blok_sayisi != 8
+                       else max(KALIB_OTD_KIYAS_PENCERE, blok + 8))
+            pencere = min(pencere, bilgi["toplam_blok"])
+            sonuc["kiyas_penceresi"] = pencere
+            print(f"  {D('1/5 blok 0-%d dökülüyor (referans)...' % (pencere - 1))}")
+            once = _k_otd_bolum_dok(fd, bolum, bilgi, 0, pencere)
+            sonuc["referans_blok_sayisi"] = len(once)
+            if blok not in once:
+                die(f"blok {blok} okunamadı; test edilemez. Başka bir blok deneyin "
+                    "(--blok N).")
+            ozgun = once[blok]
+            print(f"      {D('%d blok okundu' % len(once))}")
+            print(f"  {D('2/5 test bloğu:')}  {ozgun.hex(' ')}")
+
+            print(f"  {D('3/5 aynı baytlar geri yazılıyor...')}")
+            try:
+                _v, ham, durum = _k_otd_blok_yaz(fd, bolum, blok, ozgun,
+                                                 bilgi["bolen"])
+            except OSError as e:
+                sonuc["yazma"] = {"kabul": False, "hata": str(e)}
+                durum = None
+                stall = "Errno 32" in str(e) or "Broken pipe" in str(e)
+                print(f"      {Y('yazma reddedildi: %s' % e)}")
+                if stall:
+                    print(f"      {D('STALL = panel bu komutu tanımadı. Veri değişmedi.')}")
+            else:
+                kabul = durum in (KALIB_OTD_TAMAM, KALIB_OTD_VERI)
+                sonuc["yazma"] = {"kabul": kabul, "durum": durum,
+                                  "ham_cevap": ham.hex()}
+                etiket = {KALIB_OTD_TAMAM: "ACK", KALIB_OTD_VERI: "veri"}.get(
+                    durum, "bilinmeyen")
+                im = G if kabul else Y
+                print(f"      {im('cevap durumu 0x%02x (%s)' % (durum, etiket))}")
+
+            print(f"  {D('4/5 blok geri okunuyor...')}")
+            simdi, _h, _d = _k_otd_blok_oku(fd, bolum, blok, bilgi["bolen"])
+            korundu = simdi == ozgun
+            sonuc["blok_korundu"] = korundu
+            if korundu:
+                ok("Test bloğu birebir aynı — içerik korundu.")
+            else:
+                err(f"Test bloğu DEĞİŞTİ: {(simdi or b'').hex(' ')}")
+                sonuc["blok_yeni"] = (simdi or b"").hex()
+                sonuc["blok_ozgun"] = ozgun.hex()
+
+            print(f"  {D('5/5 aynı pencere yeniden dökülüyor (yan etki kontrolü)...')}")
+            sonra = _k_otd_bolum_dok(fd, bolum, bilgi, 0, pencere)
+            degisen = sorted(n for n in once if n in sonra and once[n] != sonra[n])
+            kaybolan = sorted(n for n in once if n not in sonra)
+            sonuc["degisen_bloklar"] = degisen
+            sonuc["okunamayan_bloklar"] = kaybolan
+            sonuc["referans"] = {str(n): v.hex() for n, v in once.items()}
+        finally:
+            os.close(fd)
+    except OSError as e:
+        if calisiyordu:
+            _t_run(["systemctl", "start", birim])
+        die(f"Cihaza erişilemedi: {e}")
+    finally:
+        if calisiyordu:
+            _t_run(["systemctl", "start", birim])
+
+    hedef = a.cikti or os.path.join(
+        TOUCH_YEDEK, time.strftime("yazma-testi-%Y%m%d-%H%M%S.json"))
+    os.makedirs(os.path.dirname(hedef) or ".", exist_ok=True)
+    _k_yaz_dosya(sonuc, hedef)
+
+    hr()
+    yz = sonuc.get("yazma") or {}
+    degisen = sonuc.get("degisen_bloklar") or []
+    kaybolan = sonuc.get("okunamayan_bloklar") or []
+    if degisen:
+        err("YAN ETKİ: şu bloklar değişti: "
+            + ", ".join(str(n) for n in degisen))
+        print(f"  {D('Adres düzeni varsayımı yanlış olabilir — yazma BAŞKA bloğa gitti.')}")
+        print(f"  {D('Referans döküm dosyada; geri yükleme için:')}")
+        print(f"  {D('  eta-112.py dokunmatik kalibrasyon depo-yaz ' + hedef)}")
+        ok(f"Kaydedildi: {Cy(hedef)}")
+        return 1
+    if kaybolan:
+        warn("Şu bloklar artık okunamıyor: " + ", ".join(str(n) for n in kaybolan))
+    if not yz.get("kabul"):
+        warn("Yazma yolu ÇALIŞMIYOR: panel komutu kabul etmedi.")
+        print(f"  {D('İyi haber: hiçbir bayt değişmedi, panel sağlam.')}")
+        print(f"  {D('b1 baytı farklı olabilir:  --b1 0x1e / 0x3c ile tekrar deneyin.')}")
+        ok(f"Kaydedildi: {Cy(hedef)}")
+        return 1
+    if not sonuc.get("blok_korundu"):
+        err("Yazma kabul edildi ama blok içeriği bozuldu.")
+        print(f"  {D('Silme (erase) gerekiyor olabilir; 0xb1 bu araca konulmadı.')}")
+        ok(f"Kaydedildi: {Cy(hedef)}")
+        return 1
+    ok("Yazma yolu DOĞRULANDI: komut kabul edildi, içerik korundu, yan etki yok.")
+    print(f"  {D('Adres düzeni (4 bayt adres + 32 bayt veri) cihazda geçerli.')}")
+    print(f"  {D('Artık ham yedek geri yüklenebilir:  kalibrasyon depo-yaz <depo.json>')}")
+    ok(f"Kaydedildi: {Cy(hedef)}")
+    return 0
+
+
+def cmd_touch_kalib_depo_yaz(a):
+    """Ham blok dokumunu ('depo' cikti dosyasi) cihaza geri yaz.
+
+    Icerigin ANLAMINI bilmeye gerek yok: 32 baytlik bloklar okundugu gibi
+    geri konur. Guvenlik siniri:
+      * yalniz OTD; panel tipi ve dosya bicimi dogrulanir,
+      * blok 0 (ASCII seri / ProductKey) VARSAYILAN OLARAK atlanir,
+      * yazmadan once hedefin tam dokumu yedeklenir,
+      * hedefte zaten ayni olan blok yazilmaz,
+      * her blok yazildiktan sonra geri okunup dogrulanir; ilk uyusmazlikta
+        durulur (kalan bloklara dokunulmaz)."""
+    if not a.dosyalar:
+        die("Kullanım: dokunmatik kalibrasyon depo-yaz <depo.json> --onayliyorum")
+    kaynak = _k_oku_dosya_depo(a.dosyalar[0])
+    tip, kimlik, yol = _k_otd_yaz_hazirla(a, "Blok geri yükleme")
+    if kaynak["panel"]["tip"] != tip:
+        die(f"Döküm {kaynak['panel']['tip']} panelden alınmış, hedef {tip}. "
+            "Farklı panel tipine yazılamaz.")
+
+    istenen = [b for b in kaynak["bolumler"]
+               if a.bolum is None or b["bolum"] == a.bolum]
+    if not istenen:
+        die(f"Dökümde bölüm {a.bolum} yok.")
+
+    title("Dokunmatik — ham blok geri yükleme")
+    print(f"  Kaynak döküm   : {Cy(a.dosyalar[0])}")
+    print(f"  Alındığı panel : {D(kaynak['panel'].get('usb') or '?')}  {D(kaynak['tarih'])}")
+    print(f"  Hedef panel    : {G(kimlik or '?')}  {D(tip)}  {D(yol)}")
+    print(f"  Bölümler       : {Cy(', '.join(str(b['bolum']) for b in istenen))}")
+    print(f"  Seri bloğu (0) : "
+          + (Y("YAZILACAK (--seri-dahil)") if a.seri_dahil else D("atlanacak")))
+    print()
+    print(f"  {ERR} {R('YAZMA YÜKÜ DÜZENİ VARSAYIMA DAYANIR.')}")
+    print(f"     {Y('Okuma protokolü kesindir; yazmada 4 bayt adres + 32 bayt veri')}")
+    print(f"     {Y('düzeni varsayılır. Önce doğrulayın:')}")
+    print(f"     {Y('  eta-112.py dokunmatik kalibrasyon yazma-testi --onayliyorum')}")
+    print()
+    if kaynak["panel"].get("usb") != kimlik:
+        warn("Bu döküm başka bir panelden alınmış.")
+        print(f"  {D('Kalibrasyon panele özgüdür (kamera konumu, cam, montaj')}")
+        print(f"  {D('toleransı). Sonuç çalışan ama hizası kaymış bir ekran olabilir;')}")
+        print(f"  {D('ardından panelin kendi kalibrasyon aracıyla yeniden kalibre edin.')}")
+    if not a.onayliyorum:
+        die("Devam etmek için açıkça onaylayın:  --onayliyorum")
+
+    birim, calisiyordu = _k_servis_durdur(tip)
+    yedek = os.path.join(
+        TOUCH_YEDEK, time.strftime("depo-yazmadan-once-%Y%m%d-%H%M%S.json"))
+    yazilan = atlanan = 0
+    basarisiz = None
+    try:
+        fd = os.open(yol, os.O_RDWR)
+        try:
+            # --- yazmadan once: hedefin tam dokumu -----------------------
+            print(f"  {D('Hedefin mevcut durumu yedekleniyor...')}")
+            yedek_bolumler = []
+            plan = []
+            for kb in istenen:
+                bolum = kb["bolum"]
+                bilgi = _k_otd_bolum_bilgi_al(fd, bolum)
+                # Yedek penceresi: dokumun dokundugu en yuksek blok + marj.
+                # Bolum 4096 blok bildiriyor; tamamini dokmek ~7 dakika ve
+                # yazmayacagimiz bloklar icin gereksiz.
+                enbuyuk = max((b.get("no", 0) for b in kb.get("bloklar") or []),
+                              default=0)
+                pencere = min(bilgi["toplam_blok"],
+                              max(KALIB_OTD_KIYAS_PENCERE, enbuyuk + 8))
+                mevcut = _k_otd_bolum_dok(fd, bolum, bilgi, 0, pencere)
+                yedek_bolumler.append({
+                    "bolum": bolum, "bilgi": bilgi,
+                    "bloklar": [{"no": n, "veri": v.hex()}
+                                for n, v in sorted(mevcut.items())]})
+                for blok in kb.get("bloklar") or []:
+                    n = blok["no"]
+                    try:
+                        veri = bytes.fromhex(blok["veri"])
+                    except ValueError:
+                        warn(f"bölüm {bolum} blok {n}: geçersiz hex — atlandı.")
+                        continue
+                    if len(veri) != KALIB_OTD_BLOK_BOYU:
+                        warn(f"bölüm {bolum} blok {n}: {len(veri)} bayt "
+                             f"({KALIB_OTD_BLOK_BOYU} olmalı) — atlandı.")
+                        continue
+                    if n == KALIB_OTD_SERI_BLOK and not a.seri_dahil:
+                        atlanan += 1
+                        continue
+                    if n >= bilgi["toplam_blok"]:
+                        warn(f"bölüm {bolum} blok {n}: bölüm dışında — atlandı.")
+                        continue
+                    if mevcut.get(n) == veri:
+                        atlanan += 1
+                        continue
+                    plan.append((bolum, n, veri, bilgi["bolen"]))
+            os.makedirs(TOUCH_YEDEK, exist_ok=True)
+            _k_yaz_dosya({"bicim": "eta-112-dokunmatik-depo/1",
+                          "tarih": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+                          "panel": {"tip": tip, "usb": kimlik, "aygit": yol},
+                          "surucu": _t_kurulu(), "makine": platform.node(),
+                          "bolumler": yedek_bolumler}, yedek)
+            ok(f"Yedek: {Cy(yedek)}")
+            print(f"  {D('Yazılacak blok: %d   ·   atlanan: %d' % (len(plan), atlanan))}")
+            if not plan:
+                hr()
+                ok("Yazılacak blok yok; hedef zaten dökümle aynı.")
+                return 0
+            print()
+            if ask(f"  {R('Yazılsın mı?')} Geri almak için yukarıdaki yedeği kullanın "
+                   "[yaz/iptal]: ").strip().lower() != "yaz":
+                warn("İptal edildi; hiçbir şey yazılmadı.")
+                return 1
+
+            # --- yaz + her blogu geri okuyup dogrula ---------------------
+            for bolum, n, veri, bolen in plan:
+                etiket = f"bölüm {bolum} blok {n}"
+                try:
+                    _v, _ham, durum = _k_otd_blok_yaz(fd, bolum, n, veri, bolen)
+                except (OSError, ValueError) as e:
+                    basarisiz = f"{etiket}: yazılamadı — {e}"
+                    break
+                if durum not in (KALIB_OTD_TAMAM, KALIB_OTD_VERI):
+                    basarisiz = f"{etiket}: panel kabul etmedi (durum 0x{durum:02x})"
+                    break
+                try:
+                    geri, _h, _d = _k_otd_blok_oku(fd, bolum, n, bolen)
+                except OSError as e:
+                    basarisiz = f"{etiket}: yazıldı ama geri okunamadı — {e}"
+                    break
+                if geri != veri:
+                    basarisiz = (f"{etiket}: geri okuma uyuşmadı\n"
+                                 f"    beklenen: {veri.hex(' ')}\n"
+                                 f"    okunan  : {(geri or b'').hex(' ')}")
+                    break
+                yazilan += 1
+                ok(f"{etiket} yazıldı ve doğrulandı")
+        finally:
+            os.close(fd)
+    except OSError as e:
+        if calisiyordu:
+            _t_run(["systemctl", "start", birim])
+        die(f"Cihaza erişilemedi: {e}")
+    finally:
+        if calisiyordu:
+            _t_run(["systemctl", "start", birim])
+
+    hr()
+    if basarisiz:
+        err(basarisiz)
+        print(f"  {D('%d blok yazıldıktan sonra durduldu; kalanlara dokunulmadı.' % yazilan)}")
+        print(f"  {D('Geri almak için:')}")
+        print(f"  {D('  eta-112.py dokunmatik kalibrasyon depo-yaz ' + yedek + ' --onayliyorum')}")
+        return 1
+    ok(f"{yazilan} blok yazıldı ve geri okumayla doğrulandı  "
+       f"{D('(atlanan: %d)' % atlanan)}")
+    print(f"  {D('Kontrol için:  eta-112.py dokunmatik kalibrasyon depo --tam')}")
+    print(f"  {D('Geri almak için:  eta-112.py dokunmatik kalibrasyon depo-yaz ' + yedek + ' --onayliyorum')}")
+    print(f"  {D('Kalibrasyon başka panelden geldiyse panelin kendi aracıyla yeniden kalibre edin.')}")
+    return 0
+
+
 def etatouch_main(argv):
     cmd = (argv[0] if argv else "durum").lower()
     if cmd in ("--help", "-h", "help", "yardim"):
@@ -3782,6 +4219,8 @@ def etatouch_main(argv):
         print("  dokunmatik kalibrasyon ham            tek komut/indeks sorgula")
         print("  dokunmatik kalibrasyon tara           OTD: hangi komut yanıt veriyor")
         print("  dokunmatik kalibrasyon depo           OTD: depolama bölümlerini oku")
+        print("  dokunmatik kalibrasyon yazma-testi    OTD: yazma yolunu no-op ile sına")
+        print("  dokunmatik kalibrasyon depo-yaz A.json  OTD: ham blok dökümünü geri yaz")
         print()
         print("  Seçenekler:")
         print("    --kademe 1   yalnız sunucu ikilisini değiştir (varsayılan, hızlı)")
@@ -3799,6 +4238,8 @@ def etatouch_main(argv):
         print("    --aralik A-B 'tara' için geniş komut aralığı — riskli, ayrıca onay ister")
         print("    --encok-indeks N  'tara' indeks üst sınırı (varsayılan 0x07)")
         print("    --bolum N / --blok N / --blok-sayisi N   'depo' için bölüm ve blok aralığı")
+        print("    --tam        'depo': bölümün tüm bloklarını oku (geri yükleme için)")
+        print("    --seri-dahil 'depo-yaz': blok 0'ı (seri/ProductKey) da yaz — normalde atlanır")
         return 0
 
     class _A:
@@ -3819,6 +4260,8 @@ def etatouch_main(argv):
         bolum = None
         blok = 0
         blok_sayisi = 8
+        tam = False            # depo: bolumun tum bloklarini oku
+        seri_dahil = False     # depo-yaz: blok 0 (seri/ProductKey) da yazilsin
         dosyalar = ()
     a = _A()
     kalan = []
@@ -3860,6 +4303,10 @@ def etatouch_main(argv):
             a.blok = max(0, int(next(it, "0"), 0))
         elif p == "--blok-sayisi":
             a.blok_sayisi = max(1, min(4096, int(next(it, "8"), 0)))
+        elif p == "--tam":
+            a.tam = True
+        elif p in ("--seri-dahil", "--seri"):
+            a.seri_dahil = True
         elif p == "--encok-indeks":
             a.encok_indeks = max(0, min(0xff, int(next(it, "0x0f"), 0)))
         else:
@@ -3899,7 +4346,12 @@ def etatouch_main(argv):
             return cmd_touch_kalib_tara(a) or 0
         if alt in ("depo", "storage", "bolum"):
             return cmd_touch_kalib_depo(a) or 0
-        die("Bilinmeyen kalibrasyon komutu: %s   (oku|karsilastir|yaz|ham|tara|depo)" % alt)
+        if alt in ("yazma-testi", "yazmatesti", "noop", "no-op"):
+            return cmd_touch_kalib_yazma_testi(a) or 0
+        if alt in ("depo-yaz", "depoyaz", "blok-yaz", "geri-yukle"):
+            return cmd_touch_kalib_depo_yaz(a) or 0
+        die("Bilinmeyen kalibrasyon komutu: %s   "
+            "(oku|karsilastir|yaz|ham|tara|depo|yazma-testi|depo-yaz)" % alt)
     die("Bilinmeyen dokunmatik komutu: %s   "
         "(durum|liste|dene|kalici|serbest|geri|kalibrasyon)" % cmd)
 
