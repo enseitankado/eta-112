@@ -15,13 +15,20 @@ dayanan hiçbir şey sessizce kullanılmıyor.
 | Cevap ayrıştırma | `OpticalService` `deviceGetFeature` @`0x4016d1` — sökülerek | **Kesin** |
 | Optical komut haritası | `OpticalService` `main` @`0x405d74` — sökülerek | **Kesin** |
 | Optical **yazma** komutları | — | **Varsayım** |
-| OTD (2621) komut haritası | — | **Bilinmiyor** |
+| OTD paket biçimi | `OtdTouchServer` paketleyici @`0x3351` — sökülerek | **Kesin** |
+| OTD komut haritası | `OtdTouchServer` dinamik sembolleri + söküm | **Kesin** |
+| OTD depolama/kayıt düzeni | `GetStorageBlock` @`0x3b9f`, `readRecord` @`0x131cd` | **Kesin** |
+| OTD blok içeriğinin **anlamı** | — | **Kısmen** (bkz. 6.6) |
+| OTD **yazma/silme** komutları | `SetStorageBlock`, `EraseStorage` — adresleri bilinir | **Kullanılmıyor** (bilerek) |
 
 Sökme işlemi `eta-touchdrv 0.3.6~tbt1` paketindeki `OpticalService` ikilisi
 üzerinde yapıldı; o sürüm sembol tablosunu taşıyor (`packageBuild`, `getCommand`,
 `setCommand`, `deviceGetFeature`, `OptSetCalibPara` … 105 sembol). Aynı ikili
 0.2.0'dan 0.5.3'e kadar hiç değişmedi, dolayısıyla bulgular bütün güncel
 sürümler için geçerli.
+
+OTD tarafı (6. bölüm) ayrı bir ikiliden çıkarıldı: `OtdTouchServer.x86_64`,
+`eta-touchdrv 0.4.0`, BuildID `4b3bf76155aace1c9d0c7ea6f9e272a416680fd3`.
 
 ---
 
@@ -137,16 +144,148 @@ doğrulanmamıştır. Bu yüzden:
 - anlık görüntünün panel tipi hedefle uyuşmazsa reddeder,
 - OTD panellerde `--dene` olmadan tamamen kapalıdır.
 
-## 6. OTD (2621) — bilinmiyor
+## 6. OTD (2621) — çözüldü
 
-Taşıma katmanı aynı (`OtdDrv.h` ile `OpticalDrv.h` aynı ioctl şemasını
-kullanıyor), ancak `OtdTouchServer` **statik derlenmiş ve sembolsüz**; komut
-haritası çıkarılmadı. `OtdCalibrationTool` sembollü (`OtdSendReport`,
-`OtdResetDevice`, `AlgInitialize` …) ve ileride bu boşluğu doldurabilecek en
-umut verici hedef.
+> **Bu bölüm 2026-09-15'te yeniden yazıldı.** Önceki hâli "bilinmiyor" diyor ve
+> gerekçe olarak `OtdTouchServer`'ın *statik derlenmiş ve sembolsüz* olduğunu
+> gösteriyordu. **Bu, 0.4.0 için doğru değil:** ikili dinamik bağlı (`libm`,
+> `libc`) ve dinamik sembol tablosunu taşıyor — `OpticalTouchDeviceGetStorageBlock`,
+> `LoadCcbParameters`, `OpticalTouchDeviceEraseStorage` … Çözüm bu sayede mümkün
+> oldu. `mimari.md` §2 de aynı yanlışı taşıyordu, o da düzeltildi.
 
-Şimdilik OTD panellerde `kalibrasyon oku` yalnızca `--dene` ile, Optical komut
-kümesini deneyerek çalışır; sonuç anlamsız çıkabilir.
+Taşıma katmanı Optical ile aynı (`OtdDrv.h` ve `OpticalDrv.h` aynı ioctl
+şemasını kullanıyor — bkz. 1. bölüm). **Paket biçimi ve komut haritası ise
+tamamen farklı.** Eski kod Optical biçimini OTD'ye gönderdiği için panel her
+isteği STALL ediyordu (`ioctl` → `-EPIPE` → "Broken pipe").
+
+### 6.1 Paket biçimi — söküm, kesin
+
+Paketleyici/alıcı-verici `@0x3351`:
+
+```
+    [0]        0x55                       (Optical'da 0xAA)
+    [1]        b1 — çağrı başına sabit: 0x1e / 0x2d / 0x3c
+    [2]        indeks / parametre
+    [3]        komut
+    [4]        n  — yük uzunluğu
+    [5..5+n-1] yük
+    [n+5]      sağlama = toplam(paket[2 .. n+4]) & 0xFF
+    gönderilen uzunluk = n+6                (Optical'da sabit 64)
+```
+
+| | Optical (6615) | OTD (2621) |
+|---|---|---|
+| Başlık `[0]` | `0xAA` | `0x55` |
+| Gönderilen uzunluk | sabit **64** | **n+6** |
+| Sağlama | `0x55 + Σ(p[0..n+4])` | `Σ(p[2..n+4])`, ofset `n+5` |
+| SET→GET arası bekleme | 10 ms | **50 ms** (`usleep(0xc350)` @`0x34b5`) |
+
+**Uzunluk kritik.** `OTD_IOCTL_CODE(tip, uzunluk)` uzunluğu ioctl kodunun alt 16
+bitinde taşır; 64'e sabitlemek USB kontrol transferinin STALL etmesine yol açar.
+
+### 6.2 Cevap — söküm @`0x34f3`, kesin
+
+```
+    [0]        0x55
+    [1]        durum:  0x87 = ACK (veri yok) · 0x4b = veri var
+    [2]        veri uzunluğu                  (yalnız 0x4b'de)
+    [3..]      veri                           (5'ten DEĞİL — 5 Optical'a ait)
+    [3+n]      sağlama = Σ(cevap[2 .. 2+n]) & 0xFF
+```
+
+Sağlama cihazda doğrulandı: `55 4b 08 |04 00 00 10 80 00 20 00| bc` →
+`0x08+0x04+0x10+0x80+0x20 = 0xBC`.
+
+### 6.3 Komut haritası — dinamik semboller + söküm, kesin
+
+Çağrı adresleri sembol aralıklarıyla eşleştirildi:
+
+| komut | n | fonksiyon | adres |
+|---|---|---|---|
+| `0xb0` | 0 | `OpticalTouchDeviceGetStoragePartitionInformation` | `0x3da2` |
+| `0xae` | 0 (indeks `0x80`) | `OtdGetAllFcb` | `0x3e36` |
+| `0xb2` | 4 | `OpticalTouchDeviceGetStorageBlock` | `0x3b9f` |
+| `0xb2` | 36 | `OpticalTouchDeviceSetStorageBlock` ⚠ | `0x3cda` |
+| `0xb1` | 2 | `OpticalTouchDeviceEraseStorage` ⚠⚠ | `0x3ac8` |
+
+> **`0xb1` silme komutudur.** Bu yüzden `kalibrasyon tara`, `--aralik` ile geniş
+> tarama istense bile `0xb1` ve `0xb2`'yi listeden zorla çıkarır. Sağlam bir
+> panelin kalibrasyonunu silmek bir tarama kazası olamaz.
+
+### 6.4 Depolama ve blok adresleme — `GetStorageBlock` @`0x3b9f`, kesin
+
+`0xb0` sekiz bayt döndürür — uint16 LE dört alan:
+
+```
+    [0:2] tip/bayrak   [2:4] toplam blok   [4:6] bölen   [6:8] blok boyu
+```
+
+`GetStorageBlock`'un 4 baytlık yükü bu bölenle hesaplanır (`divw 0x4(%r8)`):
+
+```
+    yük = uint16(blok_no // bölen) + uint16(blok_no % bölen)
+```
+
+Cihazda ölçülen: `tip=4` (bölüm 0) / `7` (1–3) / `2` (0x80), toplam blok `4096`,
+bölen `128`, blok boyu `32`. İndeks 0–3 ve `0x80` yanıt verir; `0x04`–`0x7f`
+STALL eder.
+
+### 6.5 Kayıt birleştirme — `readRecord` @`0x131cd`, kesin
+
+Veri ham blok değil **kayıt** hâlinde duruyor:
+
+```
+    blok sayısı = (uzunluk + 32) // 32
+    İLK blok : [0] baytı 0x01 OLMALI (geçerlilik); yalnız [1..31] alınır → 31 bayt
+    Sonraki  : 32 baytın tamamı
+    sonuç 'uzunluk' bayta kırpılır
+```
+
+Kayıt tabloları (`LoadFcbParameters` @`0x143e5`, `LoadCcbParameters` @`0x13ee2`):
+
+| bölüm | başl. blok | uzunluk | içerik |
+|---|---|---|---|
+| 0–3 (kameralar) | 0 | 25 | ASCII seri (`mimari.md`'deki "ProductKey") |
+| 0–3 | 1 | 82 | kamera parametreleri (31+32+19) |
+| **0x80 (CCB)** | 0 | 25 | ASCII seri |
+| 0x80 | 1 | 150 | aktif alan sınırları + double'lar |
+| 0x80 | 6 | 186 | **kalibrasyon katsayıları** |
+| 0x80 | 12 | 34 | küçük tamsayı/bayraklar |
+| 0x80 | 16 | 169 | (cihazda tamamen sıfır — kullanılmıyor) |
+| 0x80 | 22 | 186 | blok 6'nın **bayt bayt aynısı** (yedek kopya) |
+| 0x80 | 30, 31 | 25 | — |
+| 0x80 | 32 | 512 | tablo |
+
+`StaticLoadCcbParameters` @`0x14c0e` bölüm olarak **`0x80`** verir (`esi=0x80`);
+kalibrasyon kameraların bölümlerinde değil, oradadır.
+
+### 6.6 İçerik — kısmen çözüldü
+
+Sağlam bir tahtada (2621:4501) ölçülen:
+
+- Bölüm 0–3 seri: `M4-T-01-140823006218`, `...140824000832`, `...140823003161`,
+  `...140824000817`. Bölüm 0x80 seri: `M4-**C**-01-140823006219` — `T` = touch
+  kamera, `C` = kontrolcü; numaralar ardışık.
+- Blok 4+ tamamen `0xFF` (silinmiş flash): kayıtlar bittiği yerde duruyor.
+- **Katsayılar `float64`, `float32` değil.** Hizalama 8'e göre değil (kayıt
+  birleştirme 31+32 olduğu için kayıyor).
+
+`ccb/blok 6` içinden, ofset 17'den itibaren:
+
+```
+    17: -5.64964     25: -0.00086415475   33: 1.0141756    41: 0
+    49: -15.73958    57: 1.032757         65: -0.0060187163  73: 0
+```
+
+İki takım dörder double — ölçek (`1.0142`, `1.0328`), küçük çapraz terimler ve
+kaydırma (`-5.65`, `-15.74`). Kaydın başı `0x15` + dört `float32`
+(`5.0, 1452.0, 5.0, 817.0` — aktif alan sınırları).
+
+**Kesinlik sınırı:** alanların *konumu* ölçülmüş ve tekrarlanabilir; hangi
+katsayının hangi terime karşılık geldiği (sıra, çapraz terim var mı) **tek bir
+tahtadan** çıkarıldı ve doğrulanmadı. `eta-112.py` bu yüzden yorumlamıyor,
+"makul float64 avcısı" ile ofset+değer listeler — ham dökümle birlikte okunmalı.
+Avcı üst üste binen `float32` alanlarında yanlış pozitif verebilir (ör. ofset 5).
 
 ---
 
@@ -167,6 +306,20 @@ sudo eta-112.py dokunmatik kalibrasyon ham --cmd 0x30 --indeks 1 --uzunluk 59
 
 # Yalnızca aynı panelden alınmış bir yedeği geri yaz
 sudo eta-112.py dokunmatik kalibrasyon yaz sorunlu-yedek.json --onayliyorum
+```
+
+OTD (2621) panellerde komut kümesi ikiliden türetilmiş ama cihazda
+doğrulanmadığı için `--dene` istenir:
+
+```bash
+# CCB (bölüm 0x80) + kameraların FCB kayıtlarını oku
+sudo eta-112.py dokunmatik kalibrasyon oku --dene
+
+# Hangi komut/indeks çifti yanıt veriyor (silme/yazma komutları taranmaz)
+sudo eta-112.py dokunmatik kalibrasyon tara
+
+# Ham depolama dökümü — kayıt sınırlarını görmek için
+sudo eta-112.py dokunmatik kalibrasyon depo --bolum 0x80 --blok 0 --blok-sayisi 48
 ```
 
 `oku` sırasında sunucu servisi geçici olarak durdurulur (cihazı sürekli okuduğu
