@@ -262,6 +262,13 @@ kalibrasyon kameraların bölümlerinde değil, oradadır.
 
 ### 6.6 İçerik — kısmen çözüldü
 
+Bu bölümdeki ölçümler **referans tahtadan** geliyor: `2621:4501`, makine
+`etap-92f896`, sürücü `eta-touchdrv 0.5.1` — dokunmatiği ve kalibrasyonu
+sağlıklı olduğu elle teyit edilmiş tahta. Dökümleri depoda sabit duruyor:
+[`../referans/`](../referans/) (alma scripti:
+`dokunmatik/araclar/referans-al.sh`). Bir tahtada şüphe varsa karşılaştırma
+tarafı orasıdır.
+
 Sağlam bir tahtada (2621:4501) ölçülen:
 
 - Bölüm 0–3 seri: `M4-T-01-140823006218`, `...140824000832`, `...140823003161`,
