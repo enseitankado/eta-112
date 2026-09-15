@@ -1643,10 +1643,13 @@ def cmd_mac_check(a):
         return emit({"ok":ok,"mac":m,"oui":oui,"vendor":vendor,"reason":reason}, 0 if ok else 1)
     if ok:
         print(f"  {OK} {G('Geçerli Faz MAC')}: {Cy(m)}  {D('OUI '+oui+' — '+vendor)}")
+        print(D("     Bu adres 'mac set' tarafından kabul edilir. Doğrulama yalnız"))
+        print(D("     adresin kendisini sınar; tahtaya henüz hiçbir şey yazılmadı."))
         return 0
     print(f"  {ERR} {R('Geçersiz MAC')}: {a.mac}")
     if m: print(D("     normalize: %s%s"%(m, "  OUI "+oui if oui else "")))
     print(f"     {Y('neden: '+reason)}")
+    print(D("     Bu adres 'mac set' tarafından reddedilir; eFuse'a yazılmaz."))
     return 1
 
 # ----- MAC YAZMA: Realtek eFuse (rtnicpg) -----
@@ -1869,9 +1872,14 @@ def etamac_main(argv):
     if args and args[0] in ("-h","--help","yardim"):
         print(B("eta-112.py mac")+" — onboard ethernet MAC oku / doğrula / yaz")
         print("  eta-112.py mac read            # MAC(ler) + Faz OUI durumu (varsayılan)")
-        print("  eta-112.py mac check <MAC>     # önerilen MAC Faz'a ait mi? (biçim+OUI)")
+        print("  eta-112.py mac check <MAC>     # yazmadan önce sına: biçim, tür ve Faz OUI")
         print("  eta-112.py mac set <MAC> [-y]  # MAC'i Realtek eFuse'a YAZ (kalıcı, OS-bağımsız)")
         print("  eta-112.py mac [--json]        # makine-okur çıktı")
+        print(D("  check: salt-okunur ön kontrol — donanıma dokunmaz, root istemez, hiçbir şey"))
+        print(D("       yazmaz. 'set' aynı kontrolü zaten uygular; 'check' onu eFuse'a yazmadan"))
+        print(D("       önce görmenizi sağlar. Sınadığı şeyler: 12 hane biçimi; hepsi-sıfır /"))
+        print(D("       broadcast / multicast olmaması; yerel-yönetimli (rastgele) olmaması;"))
+        print(D("       OUI'nin bu modelin Faz beyaz listesinde bulunması."))
         print(D("  set: Faz OUI zorunlu; yazma geri-oku ile DOĞRULANIR; rtnicpg+pgdrv otomatik"))
         print(D("       indirilip derlenir. eFuse = OTP (tek-yönlü kalıcı): her değişiklik ~7 bayt"))
         print(D("       tüketir, GERİ ALINAMAZ; araç kaç değişiklik kaldığını gösterir. -y onaysız."))
@@ -3654,13 +3662,59 @@ def _bios_temizle():
     return etabios_main(["clear", slot])
 
 
+def _mac_dogrula():
+    """Menüdeki 'MAC doğrula' adımı: önce ne işe yaradığını anlatır, sonra sorar.
+
+    Açıklama buraya konuldu çünkü adımın kendisi zararsız; asıl risk atlanmasında.
+    'MAC değiştir' adresi Realtek eFuse'una (OTP) yazar ve o yazım geri alınamaz;
+    bu adım o yazımdan önceki kuru denemedir."""
+    prof, _d = _mac_profile()
+    ouis = (prof or {}).get("mac_ouis")
+    title("MAC doğrula — yazmadan önce ön kontrol")
+    print("  " + D("Bu adım hiçbir şeyi değiştirmez. Girdiğiniz adresi donanıma"))
+    print("  " + D("dokunmadan, yalnızca kurallara göre sınar."))
+    print()
+    print("  " + D("Neye bakar:"))
+    for ad, ne in (
+        ("biçim",    "12 onaltılık hane mi — AA:BB:CC:DD:EE:FF"),
+        ("tür",      "hepsi-sıfır, broadcast ya da multicast değil mi; bu üçü"),
+        ("",         "bir ethernet kartına MAC olarak verilemez"),
+        ("köken",    "yerel-yönetimli (rastgele) bir adres değil, gerçek bir"),
+        ("",         "üretici OUI'si mi"),
+        ("sahiplik", "adresin ilk üç baytı (OUI) bu tahtanın Faz profilinde"),
+        ("",         "izin verilen üreticiye ait mi"),
+    ):
+        print("    " + (Cy(f"{ad:<11}") if ad else " " * 11) + D(ne))
+    print()
+    print("  " + D("Bu tahta: ") + (G(prof["model_name"]) if prof else Y("tanınmadı")))
+    if ouis:
+        print("  " + D("İzinli Faz OUI: ")
+              + ", ".join(f"{Cy(o)} {D('(' + v + ')')}" for o, v in ouis.items()))
+    else:
+        print("  " + Y("Bu model için OUI beyaz listesi tanımlı değil — sahiplik"))
+        print("  " + Y("kontrolü yapılamaz, her adres geçersiz sayılır."))
+    print()
+    print("  " + D("Neden gerekli: 'MAC değiştir' adımı adresi Realtek NIC'inin eFuse'una"))
+    print("  " + D("yazar. eFuse tek-yönlüdür (OTP): yazılan geri alınamaz ve her değişiklik"))
+    print("  " + D("yongadaki sınırlı alandan ~7 bayt tüketir. Yanlış bir adresi fark etmenin"))
+    print("  " + D("yeri yazdıktan sonrası değil, burasıdır."))
+    print()
+    mac = ask("  Doğrulanacak MAC: ").strip()
+    if not mac:
+        warn("MAC girilmedi — doğrulama yapılmadı.")
+        return 1
+    print()
+    return etamac_main(["check", mac])
+
+
 def _mac_menu():
     return _menu_dongusu("MAC adresi", [
-        ("MAC oku", "", lambda: etamac_main(["read"])),
-        ("MAC değiştir", "",
+        ("MAC oku", "güncel adresler ve Faz OUI durumu",
+         lambda: etamac_main(["read"])),
+        ("MAC değiştir", "eFuse'a kalıcı yazar — geri alınamaz",
          lambda: etamac_main(["set", ask("  Yeni MAC: ").strip()])),
-        ("Bir MAC'i doğrula", "",
-         lambda: etamac_main(["check", ask("  Doğrulanacak MAC: ").strip()])),
+        ("MAC doğrula", "yazmadan önce sına — donanıma dokunmaz",
+         _mac_dogrula),
         ("Geri", "", None),
     ])
 
