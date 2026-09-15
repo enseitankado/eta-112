@@ -315,10 +315,22 @@ Varsayımı brick riski almadan sınamanın yolu, bir bloğu **kendi okunan
 değeriyle** yazmak:
 
 - Hücre NOR flash olup silme gerektirse bile içerik değişmez: `x & x = x`.
-  (Bölüm 0'da blok 4+ tamamen `0xFF` ölçüldü — silinmiş flash; varsayılan test
-  bloğu 4 bu yüzden en zararsız hedef.)
 - Geriye tek risk kalır: **adres düzeni yanlışsa yazma başka bloğa gider.**
-  Test bunu, yazmadan önce ve sonra aynı blok penceresini dökerek yakalar.
+  Test bunu, yazmadan önce ve sonra aynı blokları dökerek yakalar.
+
+**Test bloğu rastgele seçilmiyor.** En sinsi hata biçimi, iki adres alanının
+ters sırada olması: o zaman cihaz `alçak*bölen + yüksek` adresine yazar ve bu
+*geçerli* bir blok olabilir — yanlış varsayım sessizce başka bir bloğu bozar.
+Bu yüzden test bloğu, ters okuma bölümün **dışına** düşecek şekilde seçilir:
+
+```
+    blok = bölen + k,   k = ceil(toplam_blok / bölen) + 1
+    ölçülen değerlerle (toplam 4096, bölen 128):  k = 33 → blok 161
+    ters okuma: 33*128 + 1 = 4225 > 4096  →  panel STALL eder, veri kaybı yok
+```
+
+Blok 161 ayrıca kayıt bölgesinin (ilk ~48 blok) dışında ve `0xFF` (silinmiş
+flash). `--blok N` ile elle seçilebilir; o zaman bu güvence kalkar.
 
 Akış: bölüm bilgisi → pencere dökümü (referans) → bloğu oku → aynı baytları
 yaz → bloğu geri oku → pencereyi yeniden dök → karşılaştır.
@@ -331,10 +343,10 @@ yaz → bloğu geri oku → pencereyi yeniden dök → karşılaştır.
 | STALL / bilinmeyen durum | panel bu komutu tanımıyor | değişmedi |
 | başka blok değişti | adres düzeni **yanlış** | referans döküm dosyada |
 
-Kıyas penceresi varsayılan 64 blok. Bölüm 4096 blok bildiriyor ve her blok bir
-SET+GET+2×50 ms demek — tam döküm ~7 dakika; kayıtlar ilk ~48 blokta yaşadığı
-ve yanlış adresleme yakın bir bloğa düştüğü için bu pencere yeterli
-(`--blok-sayisi` ile büyütülebilir).
+Kıyas dökümü iki parçalı: **kayıt bölgesi** (baştan 64 blok) + **test bloğunun
+çevresi** (±8 blok). Bölüm 4096 blok bildiriyor ve her blok bir SET+GET+2×50 ms
+demek — tam döküm ~7 dakika, bu iki parça ise ~16 saniye. Aradaki bloklar `0xFF`
+ve bir şey söylemiyor. İlk parça `--blok-sayisi` ile büyütülebilir.
 
 ### 7.3 Geri yükleme — `kalibrasyon depo-yaz`
 

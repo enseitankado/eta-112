@@ -3020,7 +3020,34 @@ KALIB_OTD_SERI_BLOK = 0         # her bolumde blok 0 = ASCII seri / ProductKey
 # olarak onu secer, boylece bir hata bile gercek kalibrasyon verisine dokunmaz.
 # Cihazda olculdu (kalibrasyon-protokolu.md 6.6): blok 4+ tamamen 0xFF, yani
 # silinmis flash -- test icin en zararsiz hedef.
-KALIB_OTD_TEST_BLOK = 4
+KALIB_OTD_TEST_BLOK = 4         # yalniz kucuk/bilinmeyen bolumlerde geri dusus
+
+
+def _k_otd_test_blok(bilgi):
+    """Adres duzeni yanlissa STALL uretecek bir test blogu sec. -> int
+
+    Yazma yuku uint16(blok//bolen) + uint16(blok%bolen) varsayiliyor. En
+    sinsi hata bicimi, alanlarin TERS sirada olmasi: o zaman cihaz
+    (alcak*bolen + yuksek) adresine yazar ve bu gecerli bir blok olabilir --
+    yani yanlis varsayim sessizce BASKA bir blogu bozar.
+
+    Test blogunu oyle seceriz ki ters okuma bolumun DISINA dussun; panel o
+    istegi STALL eder ve hata gorunur olur, veri kaybi olmaz:
+
+        blok = bolen + k   (yuksek=1, alcak=k),  k*bolen + 1 >= toplam_blok
+
+    Cihazda olculen degerlerle (toplam 4096, bolen 128): k=33 -> blok 161,
+    ters okuma 33*128+1 = 4225 > 4096 -> STALL. Blok 161 ayrica kayit
+    bolgesinin (ilk ~48 blok) disinda ve 0xFF (silinmis flash)."""
+    bolen = bilgi.get("bolen") or 0
+    toplam = bilgi.get("toplam_blok") or 0
+    if bolen < 2 or toplam < 2:
+        return KALIB_OTD_TEST_BLOK
+    k = -(-toplam // bolen) + 1                  # ceil(toplam/bolen) + 1
+    blok = bolen + k
+    if blok >= toplam:                           # bolum bunu tasimiyor
+        return min(KALIB_OTD_TEST_BLOK, toplam - 1)
+    return blok
 
 # Bolum 4096 blok bildiriyor (olculdu) ve her blok bir SET+GET+2x50 ms demek:
 # tam dokum ~7 dakika. Yan etki kontrolu icin bu gereksiz -- kayitlar ilk
@@ -3127,6 +3154,19 @@ def _k_otd_bolum_dok(fd, bolum, bilgi, bas=0, adet=None):
             continue
         if v is not None and len(v) == KALIB_OTD_BLOK_BOYU:
             goruntu[n] = v
+    return goruntu
+
+
+def _k_otd_kiyas_goruntu(fd, bolum, bilgi, blok, pencere):
+    """Yan etki kontrolu icin iki parcali goruntu. -> {blok_no: bytes}
+
+    Her blok bir SET+GET+2x50 ms demek, yani okuma pahali. Tam bolumu (4096
+    blok, ~7 dakika) dokmek gereksiz: bilgi tasiyan yerler kayit bolgesi
+    (bastan ~64 blok) ve test blogunun kendi cevresi. Aradaki bloklar 0xFF."""
+    goruntu = _k_otd_bolum_dok(fd, bolum, bilgi, 0, pencere)
+    bas = max(0, blok - 8)
+    if bas >= pencere:
+        goruntu.update(_k_otd_bolum_dok(fd, bolum, bilgi, bas, 17))
     return goruntu
 
 
@@ -3939,15 +3979,17 @@ def cmd_touch_kalib_yazma_testi(a):
     baytlari yaz -> blogu geri oku -> tam dokumu yenile -> kiyasla."""
     tip, kimlik, yol = _k_otd_yaz_hazirla(a, "Yazma testi")
     bolum = a.bolum if a.bolum is not None else 0
-    blok = a.blok if a.blok else KALIB_OTD_TEST_BLOK
 
     title("Dokunmatik — OTD yazma yolu testi (no-op)")
     print(f"  Panel          : {G(kimlik or '?')}  {D(tip)}  {D(yol)}")
-    print(f"  Bölüm / blok   : {Cy(str(bolum))} / {Cy(str(blok))}")
+    print(f"  Bölüm          : {Cy(str(bolum))}")
+    print(f"  Blok           : "
+          + (Cy(str(a.blok)) + D("  (--blok ile verildi)") if a.blok
+             else D("bölüm bilgisine göre seçilecek (ters adres → STALL)")))
     print(f"  {D('Blok kendi değeriyle yazılır; hiçbir bayt değişmez.')}")
-    print(f"  {D('Kalibrasyon kayıtları bölüm 0 blok 0-3; varsayılan test bloğu 4.')}")
-    if blok <= 3:
-        warn(f"Blok {blok} kayıt tablosunda kullanılıyor (0=seri, 1-3=kamera "
+    print(f"  {D('Kalibrasyon kayıtları bölüm 0x80; bölüm 0 blok 0-3 kamera kaydı.')}")
+    if 0 < a.blok <= 3:
+        warn(f"Blok {a.blok} kayıt tablosunda kullanılıyor (0=seri, 1-3=kamera "
              "parametresi). Test için kullanılmayan bir blok daha güvenlidir.")
     if not a.onayliyorum:
         die("Yazma komutu gönderilecek (içerik değişmese de). Onaylayın:  --onayliyorum")
@@ -3958,7 +4000,7 @@ def cmd_touch_kalib_yazma_testi(a):
              "tarih": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
              "panel": {"tip": tip, "usb": kimlik, "aygit": yol},
              "surucu": _t_kurulu(), "makine": platform.node(),
-             "bolum": bolum, "blok": blok}
+             "bolum": bolum}   # 'blok' bolum bilgisi okunduktan sonra eklenir
     try:
         fd = os.open(yol, os.O_RDWR)
         try:
@@ -3966,15 +4008,29 @@ def cmd_touch_kalib_yazma_testi(a):
             sonuc["bolum_bilgisi"] = bilgi
             print(f"  {D('bölüm bilgisi:')} toplam blok {bilgi['toplam_blok']}  "
                   f"bölen {bilgi['bolen']}  blok boyu {bilgi['blok_boyu']}")
+            # Blok, bolum bilgisi olmadan secilemez: ters adres okumasinin
+            # bolum disina dusmesi icin bolen/toplam gerekiyor.
+            blok = a.blok if a.blok else _k_otd_test_blok(bilgi)
+            sonuc["blok"] = blok
             if blok >= bilgi["toplam_blok"]:
                 die(f"blok {blok}, bölümün {bilgi['toplam_blok']} bloğu dışında.")
+            if not a.blok:
+                ters = (blok % bilgi["bolen"]) * bilgi["bolen"] + blok // bilgi["bolen"]
+                print(f"  {D('seçilen test bloğu:')} {Cy(str(blok))}  "
+                      + (D("(adres alanları ters okunursa %d → bölüm dışı → STALL)" % ters)
+                         if ters >= bilgi["toplam_blok"]
+                         else Y("(ters okuma %d → bölüm içi; dikkat)" % ters)))
 
+            # Pencere yalniz kayit bolgesini kapsar; test blogunun cevresi
+            # _k_otd_kiyas_goruntu icinde ikinci bir parca olarak okunur.
             pencere = (a.blok_sayisi if a.blok_sayisi != 8
-                       else max(KALIB_OTD_KIYAS_PENCERE, blok + 8))
+                       else KALIB_OTD_KIYAS_PENCERE)
             pencere = min(pencere, bilgi["toplam_blok"])
             sonuc["kiyas_penceresi"] = pencere
-            print(f"  {D('1/5 blok 0-%d dökülüyor (referans)...' % (pencere - 1))}")
-            once = _k_otd_bolum_dok(fd, bolum, bilgi, 0, pencere)
+            _p1 = "1/5 blok 0-%d + test bloğu çevresi dökülüyor (referans)..." % (
+                pencere - 1)
+            print(f"  {D(_p1)}")
+            once = _k_otd_kiyas_goruntu(fd, bolum, bilgi, blok, pencere)
             sonuc["referans_blok_sayisi"] = len(once)
             if blok not in once:
                 die(f"blok {blok} okunamadı; test edilemez. Başka bir blok deneyin "
@@ -4014,8 +4070,8 @@ def cmd_touch_kalib_yazma_testi(a):
                 sonuc["blok_yeni"] = (simdi or b"").hex()
                 sonuc["blok_ozgun"] = ozgun.hex()
 
-            print(f"  {D('5/5 aynı pencere yeniden dökülüyor (yan etki kontrolü)...')}")
-            sonra = _k_otd_bolum_dok(fd, bolum, bilgi, 0, pencere)
+            print(f"  {D('5/5 aynı bloklar yeniden dökülüyor (yan etki kontrolü)...')}")
+            sonra = _k_otd_kiyas_goruntu(fd, bolum, bilgi, blok, pencere)
             degisen = sorted(n for n in once if n in sonra and once[n] != sonra[n])
             kaybolan = sorted(n for n in once if n not in sonra)
             sonuc["degisen_bloklar"] = degisen

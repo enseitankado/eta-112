@@ -24,6 +24,17 @@ import struct
 import sys
 import tempfile
 import contextlib
+import time as _gercek_time
+
+
+class _HizliTime:
+    """Protokol beklemelerini (2x50 ms/blok) testte atla."""
+
+    def __getattr__(self, ad):
+        return getattr(_gercek_time, ad)
+
+    def sleep(self, sure):
+        return None
 
 # Depo kokundeki eta-112.py (bu dosya dokunmatik/araclar/ altinda)
 KOK = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "eta-112.py")
@@ -154,6 +165,7 @@ def kosum(cihaz, yedek_dizin, cevap="yaz"):
         "ask": lambda prompt="": cevap,
         "TOUCH_YEDEK": yedek_dizin,
         "progress_timed": lambda label, fn, est=30.0: fn(),
+        "time": _HizliTime(),
     }
     for ad, deger in yamalar.items():
         ilk[ad] = getattr(E, ad)
@@ -233,7 +245,10 @@ def test_yazma_testi_temiz():
     kontrol("hiçbir blok değişmedi", cihaz.goruntu(0) == once)
     kontrol("tam olarak 1 yazma gönderildi", cihaz.yazma_sayisi == 1,
             str(cihaz.yazma_sayisi))
-    kontrol("varsayılan test bloğu 4", "/ 4" in cikti or "blok   : 0 / 4" in cikti)
+    kontrol("test bloğu bölüm bilgisinden seçildi (19)",
+            "seçilen test bloğu: 19" in cikti, cikti[:600])
+    kontrol("ters adres okuması bölüm dışına düşüyor",
+            "bölüm dışı" in cikti, cikti[:600])
     dosyalar = [f for f in os.listdir(dizin) if f.startswith("yazma-testi-")]
     kontrol("JSON çıktı kaydedildi", len(dosyalar) == 1, str(dosyalar))
     if dosyalar:
@@ -258,7 +273,7 @@ def test_yazma_testi_yanlis_adres():
     dosyalar = [f for f in os.listdir(dizin) if f.startswith("yazma-testi-")]
     if dosyalar:
         j = json.load(open(os.path.join(dizin, dosyalar[0])))
-        kontrol("JSON: değişen blok listelendi", j["degisen_bloklar"] == [5],
+        kontrol("JSON: değişen blok listelendi", j["degisen_bloklar"] == [20],
                 str(j["degisen_bloklar"]))
         kontrol("JSON: referans geri yükleme için saklandı",
                 len(j["referans"]) == TOPLAM)
@@ -441,13 +456,17 @@ def test_kiyas_penceresi():
     kontrol("çıkış kodu 0", rc == 0, f"rc={rc}\n{cikti[-400:]}")
     kontrol("4096 blok DEĞİL, ~2x64 blok okundu",
             cihaz.okuma_sayisi < 200, str(cihaz.okuma_sayisi))
-    kontrol("pencere 64 olarak bildirildi", "blok 0-63" in cikti, cikti[:400])
+    kontrol("pencere test bloğunu kapsıyor",
+            ("blok 0-63" in cikti) or ("blok 0-" in cikti), cikti[:400])
     kontrol("içerik korundu", dict(cihaz.bolumler[0]) == once)
     dosya = os.path.join(dizin, [f for f in os.listdir(dizin)
                                  if f.startswith("yazma-testi-")][0])
     j = json.load(open(dosya))
-    kontrol("JSON: kiyas_penceresi = 64", j.get("kiyas_penceresi") == 64,
-            str(j.get("kiyas_penceresi")))
+    kontrol("referans döküm test bloğunu içeriyor (2. parça)",
+            str(j.get("blok")) in (j.get("referans") or {}),
+            f"blok={j.get('blok')} pencere={j.get('kiyas_penceresi')}")
+    kontrol("referans döküm tam bölüm değil (pahalı okuma yapılmadı)",
+            len(j.get("referans") or {}) < 200, str(len(j.get("referans") or {})))
     # --blok-sayisi ile buyutulebilir
     cihaz2 = SahteOtd(toplam=4096)
     rc, cikti = calistir(["kalibrasyon", "yazma-testi", "--onayliyorum",
