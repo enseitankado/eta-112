@@ -178,6 +178,10 @@ ve geri-okunarak doğrulanır; **etkili olması için yeniden başlatma gerekir*
 sürümü kalıcı hale getirir. Kalibrasyon kayması / yanlış dokunma noktası gibi
 sorunların hangi sürücü sürümünden geldiğini bulmak içindir.
 
+⚠ Bu bölüm **deneyseldir**. Menüye girerken seçeneklerin tam olarak test edilmediği ve
+donanım/yazılım yapılandırmasına zarar verebileceği uyarısı gösterilir; açıkça `e`
+yanıtı verilmeden alt menü açılmaz.
+
 ```
   ETA-112 > Dokunmatik sürücü
 ────────────────────────────────────────────────────────────

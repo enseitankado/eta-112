@@ -5139,7 +5139,36 @@ def _touch_kalib_karsilastir():
     return etatouch_main(["kalibrasyon", "karsilastir", x, y])
 
 
+def _deneysel_onay():
+    """Deneysel bölüme girmeden önce riskleri göster, açık onay al. -> bool
+
+    Varsayılan yanıt hayır. Alt menü çağrıları _eylem_calistir'dan geçmediği için
+    Ctrl-C / girdi sonu burada yakalanır; menüden çıkmak yerine geri dönülür."""
+    title(f"{WARN}  Deneysel bölüm — dikkat")
+    print(f"  {Y('Bu menüdeki seçenekler tam olarak test edilmemiştir.')}")
+    print()
+    print(f"  {D('Tüm tahta modellerinde, panel tiplerinde ve sürücü sürümlerinde')}")
+    print(f"  {D('denenmemiştir. Seçenekler şunları yapabilir:')}")
+    print(f"    {D('• dokunmatik sürücü paketini başka bir sürümle değiştirmek')}")
+    print(f"    {D('• dokunmatik servisini durdurup yeniden başlatmak')}")
+    print(f"    {D('• panelin kalibrasyon belleğine (EEPROM) yazmak')}")
+    print()
+    print(f"  {R('Donanım veya yazılım yapılandırmasına zarar verebilir;')}")
+    print(f"  {R('dokunmatik çalışmaz hale gelebilir ya da kalibrasyon bozulabilir.')}")
+    print(f"  {D('Sonuçların sorumluluğu kullanıcıya aittir.')}")
+    hr()
+    try:
+        c = ask("  Riskleri anladım, devam etmek istiyorum [e/H]: ")
+    except (EOFError, KeyboardInterrupt):
+        print()
+        return False
+    return c.strip().lower() in ("e", "evet", "y", "yes")
+
+
 def _touch_menu():
+    if not _deneysel_onay():
+        warn("Deneysel bölüme girilmedi.")
+        return 0
     return _menu_dongusu("Dokunmatik sürücü", [
         ("Durum", "", lambda: etatouch_main(["durum"])),
         ("Sürümleri listele", "", lambda: etatouch_main(["liste"])),
