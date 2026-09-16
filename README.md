@@ -187,8 +187,9 @@ sorunların hangi sürücü sürümünden geldiğini bulmak içindir.
     4 Sürüm dene — tam
     5 Kalibrasyonu oku
     6 Kalibrasyon karşılaştır
-    7 Başlangıç durumuna dön
-    8 Sabitlemeyi kaldır
+    7 Ekrana dokunarak kalibre et
+    8 Başlangıç durumuna dön
+    9 Sabitlemeyi kaldır
       Geri
 ────────────────────────────────────────────────────────────
   ↑/↓ gez · Enter seç · 1-9 doğrudan · Esc geri
@@ -249,6 +250,34 @@ sudo eta-112.py dokunmatik kalibrasyon depo-yaz ccb.json --onayliyorum      # ge
 Geri yükleme blok 0'ı (seri / `ProductKey`) atlar, yazmadan önce hedefi yedekler ve
 her bloğu geri okuyup doğrular. Kalibrasyon panele özgü olduğu için bu bir
 **kurtarma** adımıdır; ardından panelin kendi aracıyla yeniden kalibre edilmeli.
+
+#### Ekrana dokunarak kalibrasyon
+
+Menüdeki **Ekrana dokunarak kalibre et**, `eta-touchdrv` paketindeki üretici aracını
+açar. Ekranda sırayla artı işaretleri çıkar, her birinin merkezine dokunulur:
+
+```bash
+sudo eta-112.py dokunmatik kalibrasyon ekran              # 4 nokta
+sudo eta-112.py dokunmatik kalibrasyon ekran --gelismis   # 16 nokta (yalnız Optical)
+sudo eta-112.py dokunmatik kalibrasyon ekran --sifirla    # kalibrasyonsuz duruma dön
+```
+
+| Panel | Araç | Açtığı aygıt |
+|---|---|---|
+| OTD (`2621:*`) | `OtdCalibrationTool` | `/dev/OtdOpticTouch` |
+| Optical (`6615:*`) | `calibrationTools` | `/dev/optictouch` |
+
+⚠ Bu araçlar yalnız **0.1.x kernel modülüyle** çalışır. Araçlar tüm paketlerde hâlâ
+bulunsa da 0.2.0'dan beri modül `/dev/OtdUsbRaw000` / `/dev/IRTouchOptical000`
+oluşturuyor ve araç eski düğümü bulamıyor. eta-112 uyumluluğu sürüm numarasından
+değil, aracın açtığı düğümün varlığından anlar. Uyumsuzsa aracı çalıştırmaz,
+gereken sürümü ve o sürümün bu çekirdekte kurulup kurulamayacağını söyler. 0.1.x
+modülünün 6.8+ çekirdeklerde (ETAP 23) derlenmesi beklenmediği için bu tahtalarda
+seçenek şimdilik yalnızca bilgi verir.
+
+Araç, çalışan Xorg'un ekranında (`-auth` dosyasıyla) açılır ve 5 dakikada
+bitmezse kapatılır. Yeni katsayılar panele yazılır; önceki kalibrasyon yedeklenemez,
+yalnızca sıfırlanabilir.
 
 ---
 

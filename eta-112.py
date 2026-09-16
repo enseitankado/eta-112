@@ -4256,6 +4256,249 @@ def cmd_touch_kalib_depo_yaz(a):
     return 0
 
 
+# ------------------------------------------------------------------ ekrana dokunarak kalibrasyon
+# Üreticinin kendi X11 kalibrasyon araçları her eta-touchdrv paketinde gelir:
+# ekranda artı işaretleri çizer, kullanıcı dokunur, katsayılar panele gönderilir.
+#
+# UYUMLULUK — sökülerek doğrulandı. Araçlar sürücüye özel ioctl'lerle konuşur ve
+# sabit bir aygıt düğümü açar:
+#     OtdCalibrationTool   /dev/OtdOpticTouch   (OtdTouchDriver.c — TOUCH_DEVICE_NAME)
+#     calibrationTools     /dev/optictouch      (optictouch.c)
+# Bu düğümleri yalnız 0.1.x kernel modülleri oluşturur. 0.2.0'dan beri modüller
+# /dev/OtdUsbRaw%03d ve /dev/IRTouchOptical%03d üretiyor; araçlar paketlerde hâlâ
+# duruyor ama eski düğümü aradığı için güncel sürücüyle çalışmaz. Bu yüzden
+# uyumluluk sürüm numarasından değil, aracın açtığı düğümün varlığından anlaşılır.
+#
+# Bayraklar (argc == 2 ile strcmp — sökümden):
+#     OtdCalibrationTool   --reset
+#     calibrationTools     -reset · -a (16 nokta)
+# Araçlar yalnız system("clear") çağırır; servise dokunmaz.
+
+KALIB_ARACLARI = {
+    "otd": ("OtdCalibrationTool", "touch4/OpticalTouchCalibrationTool.{arch}"),
+    "optical": ("calibrationTools", "touch2/OpticalTouchCalibrationTool.{arch}"),
+}
+KALIB_ARAC_MODULU = {"OtdOpticTouch": "OtdTouchDriver.c", "optictouch": "optictouch.c"}
+KALIB_ARAC_SIFIRLA = {"otd": "--reset", "optical": "-reset"}
+KALIB_ARAC_GELISMIS = {"optical": "-a"}          # OTD aracında 16 nokta kipi yok
+KALIB_ARAC_ZAMAN_ASIMI = 300                     # araç takılırsa ekranı kilitli bırakmasın
+
+
+def _k_arac_yolu(tip):
+    """Bu panel tipine ait üretici kalibrasyon aracı. -> yol | None"""
+    for ad in KALIB_ARACLARI[tip]:
+        yol = "/usr/bin/" + ad.format(arch=platform.machine())
+        if os.path.exists(yol):
+            return yol
+    return None
+
+
+def _k_arac_dugumu(yol):
+    """Aracın açtığı aygıt düğümünü ikilinin dizgilerinden oku. -> '/dev/..' | None
+
+    /dev/bus/usb (gömülü libusb) ve /dev/null gibi genel düğümler elenir; kalan
+    tek düğüm aracın sürücüyle konuştuğu yerdir."""
+    try:
+        with open(yol, "rb") as f:
+            veri = f.read()
+    except OSError:
+        return None
+    for m in re.finditer(rb"/dev/([A-Za-z][A-Za-z0-9_]*)\x00", veri):
+        ad = m.group(1).decode()
+        if ad not in ("null", "full", "zero", "tty", "console"):
+            return "/dev/" + ad
+    return None
+
+
+def _k_karakter_aygiti_mi(yol):
+    import stat
+    try:
+        return stat.S_ISCHR(os.stat(yol).st_mode)
+    except OSError:
+        return False
+
+
+def _k_x_ekrani():
+    """Aracın açılacağı X ekranı ve yetki dosyası. -> (DISPLAY, XAUTHORITY|None) | None
+
+    Önce çalışan Xorg'un komut satırına bakılır (lightdm: -auth /var/run/lightdm/root/:0);
+    root o dosyayla her oturuma bağlanabilir. Bulunamazsa sudo'nun koruduğu
+    DISPLAY/XAUTHORITY, o da yoksa çağıran kullanıcının ~/.Xauthority'si denenir."""
+    for pid in sorted(glob.glob("/proc/[0-9]*/cmdline")):
+        try:
+            with open(pid, "rb") as f:
+                argv = f.read().decode(errors="replace").split("\0")
+        except OSError:
+            continue
+        if os.path.basename(argv[0]) not in ("Xorg", "X"):
+            continue
+        ekran = next((x for x in argv[1:] if re.fullmatch(r":\d+", x)), ":0")
+        yetki = argv[argv.index("-auth") + 1] if "-auth" in argv[:-1] else None
+        return ekran, yetki
+    ekran = os.environ.get("DISPLAY")
+    if not ekran:
+        return None
+    yetki = os.environ.get("XAUTHORITY")
+    if not yetki and os.environ.get("SUDO_USER"):
+        aday = os.path.expanduser(f"~{os.environ['SUDO_USER']}/.Xauthority")
+        yetki = aday if os.path.exists(aday) else None
+    return ekran, yetki
+
+
+def _k_arac_uyumsuz(tip, arac, dugum):
+    """Araç bu sürücüyle çalışmıyor: nedenini ve yapılabilecekleri anlat."""
+    modul = KALIB_ARAC_MODULU.get(os.path.basename(dugum))
+    suruculer = sorted(glob.glob("/dev/OtdUsbRaw*" if tip == "otd" else "/dev/IRTouchOptical*"))
+    print(f"  Sürücü aygıtı  : {G(', '.join(suruculer)) if suruculer else Y('yok')}")
+    hr()
+    warn("Kalibrasyon aracı bu sürücüyle uyumlu değil.")
+    print(f"  {D(os.path.basename(arac) + ' ' + dugum + ' aygıtını açar; o düğümü yalnız')}")
+    print(f"  {D('0.1.x kernel modülü (' + (modul or '?') + ') oluşturur. Kurulu sürücü')}")
+    print(f"  {D('başka bir düğüm kullandığı için araç panele ulaşamaz.')}")
+    man = _t_manifest(None, sessiz=True) if modul else None
+    if not man:
+        return 1
+    uygun = [k for k in man["surumler"]
+             if k["sinif"] == "resmi" and modul in (k.get("modul_kaynagi") or [])]
+    if not uygun:
+        return 1
+    yeni_cekirdek = tuple(int(x) for x in platform.release().split(".")[:2]) >= (6, 8)
+    derlenir = [k["surum"] for k in uygun if k["guncel_cekirdekte_derlenir"] or not yeni_cekirdek]
+    print()
+    print(f"  Uyumlu modülü taşıyan sürümler: {Cy(', '.join(k['surum'] for k in uygun))}")
+    if derlenir:
+        print(f"  {D('Önce bu sürümü tam kurun, sonra bu seçeneği yeniden çalıştırın:')}")
+        print(f"  {D('  Sürüm dene — tam   (eta-112.py dokunmatik dene --kademe 2 --surum ' + derlenir[-1] + ')')}")
+    else:
+        print(f"  {D('Bu sürümlerin modülü çekirdek ' + platform.release() + ' üzerinde derlenmiyor;')}")
+        print(f"  {D('bu tahtada üretici aracıyla kalibrasyon yapılamaz. Kalibrasyon sorunu için')}")
+        print("  " + D('"Sürüm dene" ve "Kalibrasyonu oku / karşılaştır" adımlarını kullanın.'))
+    return 1
+
+
+def _k_arac_kipi(a, tip):
+    """Kalibre et / 16 nokta / sıfırla. -> araç argümanları | None (vazgeçildi)"""
+    if a.sifirla:
+        return [KALIB_ARAC_SIFIRLA[tip]]
+    if a.gelismis:
+        return [KALIB_ARAC_GELISMIS[tip]]
+    if not _TTY.isatty():
+        return []
+    kipler = [("kalibre et (4 nokta)", [])]
+    if tip in KALIB_ARAC_GELISMIS:
+        kipler.append(("gelişmiş kalibrasyon (16 nokta)", [KALIB_ARAC_GELISMIS[tip]]))
+    kipler.append(("kalibrasyonu sıfırla", [KALIB_ARAC_SIFIRLA[tip]]))
+    print()
+    for i, (ad, _) in enumerate(kipler, 1):
+        print(f"    {Cy(str(i))} {ad}")
+    for _ in range(3):
+        c = ask(f"  Kip [1-{len(kipler)}, v=vazgeç]: ").strip().lower()
+        if c in ("v", "q", "vazgec", "vazgeç"):
+            return None
+        if c.isdigit() and 1 <= int(c) <= len(kipler):
+            return kipler[int(c) - 1][1]
+        if c == "":
+            return kipler[0][1]
+        print(f"  {Y('Geçersiz seçim.')}")
+    return None
+
+
+def cmd_touch_kalib_ekran(a):
+    if _t_kok() is None:
+        die("Bunun için 'sudo' gerekli.")
+    tip, kimlik = _t_tip_coz(a, "Ekran kalibrasyonu")
+    if a.gelismis and tip not in KALIB_ARAC_GELISMIS:
+        die("OTD (4 kamera) kalibrasyon aracında 16 noktalı kip yok.")
+    arac = _k_arac_yolu(tip)
+    title("Dokunmatik — ekrana dokunarak kalibrasyon")
+    print(f"  Panel          : {G(kimlik or '?')}  {D('(' + ('OTD / 4 kamera' if tip == 'otd' else 'Optical / 2 kamera') + ')')}")
+    print(f"  Kurulu sürüm   : {G(_t_kurulu() or '?')}")
+    if not arac:
+        hr()
+        adlar = ", ".join(x.format(arch=platform.machine()) for x in KALIB_ARACLARI[tip])
+        die(f"Kalibrasyon aracı bulunamadı (/usr/bin: {adlar}).\n"
+            f"    Araç eta-touchdrv paketiyle gelir; paket kurulu mu?  eta-112.py dokunmatik durum")
+    dugum = _k_arac_dugumu(arac)
+    print(f"  Araç           : {Cy(arac)}")
+    if not dugum:
+        hr()
+        die("Aracın hangi aygıtı açtığı ikiliden okunamadı; uyumluluk sınanamıyor.")
+    uyumlu = _k_karakter_aygiti_mi(dugum)
+    print(f"  Aracın aygıtı  : {G(dugum) if uyumlu else Y(dugum + '  yok')}")
+    if not uyumlu:
+        return _k_arac_uyumsuz(tip, arac, dugum)
+
+    x = _k_x_ekrani()
+    print(f"  X ekranı       : {G(x[0]) + '  ' + D(x[1] or 'yetki dosyası yok') if x else Y('bulunamadı')}")
+    hr()
+    if not x:
+        die("Çalışan bir X oturumu bulunamadı. Araç ekranda çizim yapar;\n"
+            "    masaüstü açıkken, tahtanın kendi terminalinden çalıştırın.")
+    ok("Araç bu sürücüyle uyumlu.")
+
+    arg = _k_arac_kipi(a, tip)
+    if arg is None:
+        warn("Vazgeçildi.")
+        return 0
+    sifirla = arg == [KALIB_ARAC_SIFIRLA[tip]]
+    print()
+    if sifirla:
+        print(f"  {D('Panel kalibrasyonsuz (ham koordinat) duruma döndürülecek. Bu önceki')}")
+        print(f"  {D('kalibrasyona dönüş değildir.')}")
+    else:
+        print(f"  {D('Ekran tam ekran bir kalibrasyon penceresiyle kaplanacak ve sırayla artı')}")
+        print(f"  {D('işaretleri çıkacak. Her birinin tam merkezine parmağınızla dokunun.')}")
+        print(f"  {D('Araç hesapladığı katsayıları panele yazar; mevcut değerler yedeklenemez')}")
+        print(f"  {D('(yalnız sıfırlanabilir). Araç ' + str(KALIB_ARAC_ZAMAN_ASIMI // 60) + ' dakika içinde bitmezse kapatılır.')}")
+    if ask("  Başlansın mı? [E/h]: ").strip().lower() in ("h", "hayır", "hayir", "n"):
+        return 0
+
+    ortam = dict(os.environ, DISPLAY=x[0])
+    if x[1]:
+        ortam["XAUTHORITY"] = x[1]
+    # stdout yakalanır: araçların system("clear") çağrısı terminali silmesin.
+    p = subprocess.Popen([arac] + arg, env=ortam, stdin=subprocess.DEVNULL,
+                         stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    zaman_asimi = False
+    try:
+        cikti, _ = p.communicate(timeout=KALIB_ARAC_ZAMAN_ASIMI)
+    except subprocess.TimeoutExpired:
+        p.kill()
+        cikti, _ = p.communicate()
+        zaman_asimi = True
+    except KeyboardInterrupt:
+        p.kill()
+        p.communicate()
+        raise
+
+    satirlar = []
+    for s in re.sub(r"\x1b\[[0-9;?]*[A-Za-z]", "", cikti.decode(errors="replace")).splitlines():
+        s = s.strip()
+        if s and not s.startswith("*"):          # açılış afişi
+            satirlar.append(s)
+    for s in satirlar[-8:]:
+        print(f"    {D(s)}")
+    hr()
+    metin = "\n".join(satirlar)
+    if zaman_asimi:
+        err(f"Araç {KALIB_ARAC_ZAMAN_ASIMI} saniyede bitmedi ve kapatıldı.")
+        return 1
+    if "cannot connect to X server" in metin:
+        err(f"Araç X ekranına ({x[0]}) bağlanamadı.")
+        print(f"  {D('Masaüstü oturumu açık mı? Gerekirse:  sudo DISPLAY=:0 XAUTHORITY=... eta-112.py ...')}")
+        return 1
+    if p.returncode != 0 or re.search(r"(?i)failed|no device found", metin):
+        err(f"Kalibrasyon aracı hata bildirdi (çıkış kodu {p.returncode}).")
+        return 1
+    if sifirla:
+        ok("Kalibrasyon sıfırlandı.")
+    else:
+        ok("Kalibrasyon aracı tamamlandı.")
+        print(f"  {D('Ekranın köşelerine ve ortasına dokunarak sonucu kontrol edin. Beğenmezseniz')}")
+        print("  " + D('bu adımı yeniden çalıştırın ya da "kalibrasyonu sıfırla" kipini seçin.'))
+    return 0
+
+
 def etatouch_main(argv):
     cmd = (argv[0] if argv else "durum").lower()
     if cmd in ("--help", "-h", "help", "yardim"):
@@ -4277,6 +4520,7 @@ def etatouch_main(argv):
         print("  dokunmatik kalibrasyon depo           OTD: depolama bölümlerini oku")
         print("  dokunmatik kalibrasyon yazma-testi    OTD: yazma yolunu no-op ile sına")
         print("  dokunmatik kalibrasyon depo-yaz A.json  OTD: ham blok dökümünü geri yaz")
+        print("  dokunmatik kalibrasyon ekran          üretici aracıyla ekrana dokunarak kalibre et")
         print()
         print("  Seçenekler:")
         print("    --kademe 1   yalnız sunucu ikilisini değiştir (varsayılan, hızlı)")
@@ -4296,6 +4540,8 @@ def etatouch_main(argv):
         print("    --bolum N / --blok N / --blok-sayisi N   'depo' için bölüm ve blok aralığı")
         print("    --tam        'depo': bölümün tüm bloklarını oku (geri yükleme için)")
         print("    --seri-dahil 'depo-yaz': blok 0'ı (seri/ProductKey) da yaz — normalde atlanır")
+        print("    --gelismis   'ekran': 16 noktalı kalibrasyon (yalnız Optical aracında)")
+        print("    --sifirla    'ekran': panel kalibrasyonunu sıfırla")
         return 0
 
     class _A:
@@ -4318,6 +4564,8 @@ def etatouch_main(argv):
         blok_sayisi = 8
         tam = False            # depo: bolumun tum bloklarini oku
         seri_dahil = False     # depo-yaz: blok 0 (seri/ProductKey) da yazilsin
+        gelismis = False       # ekran: 16 nokta
+        sifirla = False        # ekran: kalibrasyonu sifirla
         dosyalar = ()
     a = _A()
     kalan = []
@@ -4363,6 +4611,10 @@ def etatouch_main(argv):
             a.tam = True
         elif p in ("--seri-dahil", "--seri"):
             a.seri_dahil = True
+        elif p in ("--gelismis", "--gelişmiş"):
+            a.gelismis = True
+        elif p in ("--sifirla", "--sıfırla"):
+            a.sifirla = True
         elif p == "--encok-indeks":
             a.encok_indeks = max(0, min(0xff, int(next(it, "0x0f"), 0)))
         else:
@@ -4406,8 +4658,12 @@ def etatouch_main(argv):
             return cmd_touch_kalib_yazma_testi(a) or 0
         if alt in ("depo-yaz", "depoyaz", "blok-yaz", "geri-yukle"):
             return cmd_touch_kalib_depo_yaz(a) or 0
+        if alt in ("ekran", "dokunarak", "arac", "araç"):
+            if a.gelismis and a.sifirla:
+                die("--gelismis ve --sifirla birlikte kullanılamaz.")
+            return cmd_touch_kalib_ekran(a) or 0
         die("Bilinmeyen kalibrasyon komutu: %s   "
-            "(oku|karsilastir|yaz|ham|tara|depo|yazma-testi|depo-yaz)" % alt)
+            "(oku|karsilastir|yaz|ham|tara|depo|yazma-testi|depo-yaz|ekran)" % alt)
     die("Bilinmeyen dokunmatik komutu: %s   "
         "(durum|liste|dene|kalici|serbest|geri|kalibrasyon)" % cmd)
 
@@ -4880,6 +5136,8 @@ def _touch_menu():
         ("Sürüm dene — tam", "", lambda: etatouch_main(["dene", "--kademe", "2"])),
         ("Kalibrasyonu oku", "", _touch_kalib_oku),
         ("Kalibrasyon karşılaştır", "", _touch_kalib_karsilastir),
+        ("Ekrana dokunarak kalibre et", "",
+         lambda: etatouch_main(["kalibrasyon", "ekran"])),
         ("Başlangıç durumuna dön", "", lambda: etatouch_main(["geri"])),
         ("Sabitlemeyi kaldır", "", lambda: etatouch_main(["serbest"])),
         ("Geri", "", None),
