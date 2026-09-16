@@ -5157,7 +5157,7 @@ def _menu():
     return _menu_dongusu("ETA-112", [
         ("Kullanıcı hesapları", "", lambda: kps_main([])),
         ("BIOS EEPROM", "", _bios_eeprom_menu, True),
-        ("Dokunmatik sürücü", "", _touch_menu, True),
+        ("Dokunmatik sürücü (Deneysel)", "", _touch_menu, True),
         ("Çıkış", "", None),
     ], ana=True)
 

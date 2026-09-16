@@ -34,7 +34,7 @@ Açılan **renkli açılır menüde** ok tuşlarıyla gezinip **Enter** ile seç
 ────────────────────────────────────────────────────────────
   ▸ 1 Kullanıcı hesapları
     2 BIOS EEPROM
-    3 Dokunmatik sürücü
+    3 Dokunmatik sürücü (Deneysel)
       Çıkış
 ────────────────────────────────────────────────────────────
   ↑/↓ gez · Enter seç · 1-9 doğrudan · Esc → Çıkış
