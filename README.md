@@ -37,7 +37,7 @@ Açılan **renkli açılır menüde** ok tuşlarıyla gezinip **Enter** ile seç
     3 Dokunmatik sürücü (Deneysel)
       Çıkış
 ────────────────────────────────────────────────────────────
-  ↑/↓ gez · Enter seç · 1-9 doğrudan · Esc → Çıkış
+  ↑/↓ gez · Enter seç · 1-9 doğrudan · Esc Esc → Çıkış
 ```
 
 ---

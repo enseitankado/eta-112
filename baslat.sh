@@ -4769,7 +4769,11 @@ def _menu_etkilesimli():
 
 def _tus_oku(fd):
     """Tek tuş veya kaçış dizisi oku. -> 'yukari'|'asagi'|'bas'|'son'|'giris'|
-    'esc'|'ctrl-c'|tek karakter|None"""
+    'esc'|'esc-esc'|'geri'|'ctrl-c'|tek karakter|None
+
+    'esc' yalnız gerçek Esc tuşudur; sol ok ve tanınmayan diziler 'geri' döner,
+    böylece ana menüdeki çift-Esc çıkışını tetiklemezler. İki Esc 50 ms içinde
+    gelirse ikinci bayt dizinin devamı sanılıp yutulmasın diye 'esc-esc' döner."""
     import select
     try:
         b = os.read(fd, 1)
@@ -4786,19 +4790,21 @@ def _tus_oku(fd):
         if not r:
             return "esc"
         b2 = os.read(fd, 1)
+        if b2 == b"\x1b":
+            return "esc-esc"
         if b2 not in (b"[", b"O"):
-            return "esc"
+            return "geri"                # Alt+tuş
         b3 = os.read(fd, 1)
         if b3 == b"":
-            return "esc"
+            return "geri"
         if b3 in b"0123456789":          # ör. ESC [ 5 ~  (page up)
             while True:
                 b4 = os.read(fd, 1)
                 if b4 in (b"~", b""):
                     break
-            return {b"5": "bas", b"6": "son"}.get(b3, "esc")
+            return {b"5": "bas", b"6": "son"}.get(b3, "geri")
         return {b"A": "yukari", b"B": "asagi", b"H": "bas", b"F": "son",
-                b"C": "giris", b"D": "esc"}.get(b3, "esc")
+                b"C": "giris", b"D": "geri"}.get(b3, "geri")
     try:
         return b.decode("utf-8", "replace")
     except UnicodeDecodeError:
@@ -4886,7 +4892,7 @@ def _menu_ciz(baslik, ogeler, secili, ana):
     if bit < n:
         satirlar.append(f"    {C.DIM}↓ {n - bit} öğe daha{C.R}")
     satirlar.append(C.DIM + "─" * 60 + C.R)
-    ipucu = _MENU_IPUCU if not ana else _MENU_IPUCU.replace("Esc geri", "Esc → Çıkış")
+    ipucu = _MENU_IPUCU if not ana else _MENU_IPUCU.replace("Esc geri", "Esc Esc → Çıkış")
     satirlar.append(f"  {C.DIM}{ipucu}{C.R}")
     return satirlar
 
@@ -4913,7 +4919,8 @@ def _secim(baslik, ogeler, secili=0, ana=False):
 
     Son öğe her zaman 'Geri'/'Çıkış' sayılır. Esc/q/0:
       * alt menüde  -> son öğe seçilir (üst menüye dön)
-      * ana menüde  -> imleç son öğeye taşınır, çıkmak için Enter gerekir
+      * ana menüde  -> imleç son öğeye taşınır, çıkmak için Enter gerekir;
+                       Esc art arda iki kez basılırsa doğrudan çıkılır
     """
     if not _menu_etkilesimli():
         s = _secim_basit(baslik, ogeler, ana)
@@ -4923,6 +4930,7 @@ def _secim(baslik, ogeler, secili=0, ana=False):
     secili = max(0, min(secili, son))
     cizilen = 0
     sonuc = None
+    onceki = None
     with _ham_tty(fd):
         while sonuc is None:
             satirlar = _menu_ciz(baslik, ogeler, secili, ana)
@@ -4947,13 +4955,16 @@ def _secim(baslik, ogeler, secili=0, ana=False):
                 secili = son
             elif t == "giris":
                 sonuc = secili
-            elif t in ("esc", "ctrl-c", "q", "Q", "0"):
+            elif t in ("esc", "esc-esc", "geri", "ctrl-c", "q", "Q", "0"):
                 if not ana:
                     sonuc = son
+                elif t == "esc-esc" or (t == "esc" and onceki == "esc"):
+                    sonuc = son       # ana menüde çift Esc: doğrudan çık
                 else:
                     secili = son      # ana menüde çıkmak için ayrıca Enter gerekir
             elif t.isdigit() and 1 <= int(t) <= son:
                 sonuc = int(t) - 1
+            onceki = t
         # Seçim yapıldı: menü bloğunu ekrandan sil. Alt menü ya da işlem çıktısı
         # üstte asılı kalan bir menünün altına değil, tam onun yerine çizilsin.
         sys.stdout.write(f"\033[{cizilen}A\033[J")
