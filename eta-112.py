@@ -5202,6 +5202,81 @@ def _menu():
     ], ana=True)
 
 
+# ===================== geri bildirim (ntfy) =====================
+_NTFY_TOPIC = "eta-112"
+
+# Çıkışta gösterilen, geliştiriciyi motive edici mesaj. Son satır ile e/h sorusu
+# arasına bir boş satır konur (bkz. _exit_feedback).
+_MOTIVASYON = [
+    "Bu araç meşakkatli bir emeğin ürünüdür: Faz 1, Faz 2 Intel ve Faz 2 AMD",
+    "tahtalarında defalarca donanım EEPROM sökülüp lehimlendi ve uzun bir",
+    "tersine mühendislik çalışması yürütüldü. Küçük bir teşekkür, tavsiye ya",
+    "da uyarı bile geliştiriciyi motive eder.",
+]
+
+
+def _ntfy_gonder(mesaj, topic=_NTFY_TOPIC, timeout=15):
+    """Mesajı ntfy.sh/<topic>'e POST eder. Döner (ok: bool, bilgi: str)."""
+    import urllib.request
+    url = "https://ntfy.sh/" + topic
+    req = urllib.request.Request(
+        url, data=mesaj.encode("utf-8"), method="POST",
+        headers={"Title": "eta-112 geri bildirim", "Tags": "eta-112,linux,speech_balloon",
+                 "User-Agent": "eta-112"})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            code = getattr(r, "status", None) or r.getcode()
+            return (200 <= int(code) < 300), "HTTP %s" % code
+    except Exception as e:  # noqa: BLE001
+        return False, str(e)
+
+
+def _feedback_context():
+    """Geliştiriciye bağlam: kart/BIOS (kişisel veri değil). Alınamazsa boş."""
+    def _rd(p):
+        try:
+            with open(p) as f:
+                return f.read().strip()
+        except Exception:  # noqa: BLE001
+            return ""
+    s = (_rd("/sys/class/dmi/id/board_name") + " " +
+         _rd("/sys/class/dmi/id/bios_version")).strip()
+    return s
+
+
+def _exit_feedback():
+    """Ana menüden çıkarken geliştiriciye (Özgür Koca, ozgurkoca.com) ntfy ile mesaj
+    göndermek isteyip istemediğini sorar. Yalnız etkileşimli (tty) oturumda."""
+    try:
+        if not (sys.stdin.isatty() and sys.stdout.isatty()):
+            return
+    except Exception:  # noqa: BLE001
+        return
+    try:
+        print()
+        for ln in _MOTIVASYON:
+            print(D("  " + ln))
+        print()   # motive edici metnin son satırı ile e/h sorusu arasında boş satır
+        c = ask("  Geliştirici Özgür Koca'ya (ozgurkoca.com) bir mesaj bırakmak "
+                "ister misiniz? [e/H]: ")
+        if c.strip().lower() not in ("e", "evet", "y", "yes"):
+            return
+        print(D("  Mesajınız (tek satır). Boş bırakıp Enter'a basarsanız vazgeçilir."))
+        msg = ask("  > ").strip()
+        if not msg:
+            print(D("  Geri bildirim gönderilmedi."))
+            return
+        ctx = _feedback_context()
+        full = msg if not ctx else (msg + "\n\n[cihaz: " + ctx + "]")
+        ok, info = _ntfy_gonder(full)
+        if ok:
+            print("  " + G("Geri bildiriminiz gönderildi — teşekkürler!"))
+        else:
+            print("  " + Y("Gönderilemedi (" + info + "). İnternet bağlantınızı kontrol edin."))
+    except (EOFError, KeyboardInterrupt):
+        return
+
+
 def main():
     argv = sys.argv[1:]
     if argv and argv[0] in ("--help", "-h", "help", "yardim"):
@@ -5220,7 +5295,9 @@ def main():
         if argv[0].startswith("-"):     # çıplak bayraklar -> kullanıcı modu (geriye uyum)
             return kps_main(argv) or 0
         die("Bilinmeyen komut: %s   ('eta-112.py --help')" % argv[0])
-    return _menu()
+    rc = _menu()
+    _exit_feedback()   # ana menüden çıkışta geliştiriciye geri bildirim sor (ntfy)
+    return rc
 
 
 if __name__ == "__main__":
