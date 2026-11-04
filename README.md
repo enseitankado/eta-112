@@ -298,6 +298,15 @@ yalnızca sıfırlanabilir.
 
 ---
 
+---
+
+## Bir ricam
+
+Küçük bir ricam var: araç işinizi gördüyse GitHub'da yıldız bırakın. Yıldız
+sayısının bana bir getirisi yok ama aynı sorunu yaşayan başka birinin depoyu
+bulmasını kolaylaştırıyor. Bir de, açıkçası, onca saatin birilerinin işine
+yaradığını görmek güzel oluyor.
+
 ## Geliştirici ve lisans
 
 - Geliştirici: **Özgür Koca** — [ozgurkoca.com](https://ozgurkoca.com)
