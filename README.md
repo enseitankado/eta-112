@@ -7,6 +7,10 @@
 Pardus ETAP akıllı tahtalar için bakım aracı. Canlı (USB) ortamdan da, çalışan
 sistemden de kullanılabilir.
 
+> ⚠️ **Bu depo yalnızca Linux ortamında çalışmak için hazırlanmıştır.** BIOS/EEPROM
+> işlevlerini **Windows** üzerinde kullanacaksanız Windows portu deposunu ziyaret edin:
+> **[eta-112-win](https://github.com/enseitankado/eta-112-win)**.
+
 - **Kullanıcı hesapları** — kurulu sistemin hesap parolalarını sıfırlar.
 - **BIOS parolası** — yönetici/kullanıcı parolasını okur, ayarlar, temizler.
 - **MAC adresi** — onboard MAC'i okur, doğrular ve Realtek eFuse'una kalıcı yazar.
