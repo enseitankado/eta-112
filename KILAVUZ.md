@@ -1,0 +1,291 @@
+# eta-112 kullanım kılavuzu
+
+> Kısa tanıtım ve hızlı başlangıç için [README.md](README.md) dosyasına bakın.
+
+Pardus ETAP akıllı tahtalar için bakım aracı. Canlı (USB) ortamdan da, çalışan
+sistemden de kullanılabilir.
+
+> ⚠️ **Bu depo yalnızca Linux ortamında çalışmak için hazırlanmıştır.** BIOS/EEPROM
+> işlevlerini **Windows** üzerinde kullanacaksanız Windows portu deposunu ziyaret edin:
+> **[eta-112-win](https://github.com/enseitankado/eta-112-win)**.
+
+- **Kullanıcı hesapları** — kurulu sistemin hesap parolalarını sıfırlar.
+- **BIOS parolası** — yönetici/kullanıcı parolasını okur, ayarlar, temizler.
+- **MAC adresi** — onboard MAC'i okur, doğrular ve Realtek eFuse'una kalıcı yazar.
+- **Windows ürün anahtarı** — BIOS'taki OEM anahtarı (ACPI MSDM) okur ve değiştirir.
+- **Dokunmatik sürücü** — `eta-touchdrv` sürümlerini sırayla deneyip kalibrasyon
+  sorununu düzelteni bulur; panelin EEPROM kalibrasyonunu okur ve karşılaştırır.
+
+BIOS parolası, MAC adresi ve Windows ürün anahtarı firmware/donanım seviyesindedir —
+disk silinse de kalıcıdır ve yalnızca **desteklenen modellerde** çalışır.
+
+---
+
+## Çalıştırma
+
+Kurulum gerektirmez. Aşağıdaki komutu kopyalayarak bir terminale yapıştırın.
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/enseitankado/eta-112/main/baslat.sh | sudo bash
+```
+
+Açılan **renkli açılır menüde** ok tuşlarıyla gezinip **Enter** ile seçim yapılır:
+
+```
+  ETA-112
+────────────────────────────────────────────────────────────
+  ▸ 1 Kullanıcı hesapları
+    2 BIOS EEPROM
+    3 Dokunmatik sürücü (Deneysel)
+      Çıkış
+────────────────────────────────────────────────────────────
+  ↑/↓ gez · Enter seç · 1-9 doğrudan · Esc Esc → Çıkış
+```
+
+---
+
+### Kullanıcı hesapları
+
+Kurulu işletim sistemi otomatik bulunur. Diskte birden çok kurulum varsa önce hedef
+seçilir:
+
+```
+  ETA-112 > Kullanıcı hesapları > Hedef kurulum
+────────────────────────────────────────────────────────────
+  ▸ 1 Pardus ETAP 23  (/dev/sda2, 120G)  ← çalışan sistem
+    2 Debian 12  (/dev/sdb1, 500G)
+    3 Pardus 21  (/dev/nvme0n1p3, 80G)
+      İptal
+────────────────────────────────────────────────────────────
+  ↑/↓ gez · Enter seç · 1-9 doğrudan · Esc geri
+```
+
+Ardından hesap seçilir. Liste varsayılan olarak giriş yapabilen hesapları gösterir;
+sondan bir önceki satır sistem hesaplarını da katar:
+
+```
+  ETA-112 > Kullanıcı hesapları > Hesap seç
+────────────────────────────────────────────────────────────
+  ▸ 1 root             UID 0      root
+    2 etapadmin        UID 1000   ETAP Yonetici
+    3 ogretmen         UID 1001   Ogretmen
+    4 ogrenci          UID 1002   Ogrenci
+    5 misafir          UID 1003   Misafir Hesabi
+    6 Tüm hesapları göster (sistem hesapları dahil)
+      İptal
+────────────────────────────────────────────────────────────
+  ↑/↓ gez · Enter seç · 1-9 doğrudan · Esc geri
+```
+
+Yeni parola iki kez girilir, uygulanır ve doğru ayarlandığı **kriptografik olarak
+doğrulanır**. Bitince hedef disk serbest bırakılır.
+
+---
+
+### BIOS EEPROM
+
+Firmware ve donanım seviyesindeki üç işlev:
+
+```
+  ETA-112 > BIOS EEPROM
+────────────────────────────────────────────────────────────
+  ▸ 1 BIOS parolası
+    2 MAC adresi
+    3 Windows ürün anahtarı
+      Geri
+────────────────────────────────────────────────────────────
+  ↑/↓ gez · Enter seç · 1-9 doğrudan · Esc geri
+```
+
+**Desteklenen donanımlar (2026):**
+
+Model, anakart, işlemci ve BIOS sürümüyle birlikte tablo:
+[README.md: desteklenen donanımlar](README.md#desteklenen-donanımlar)
+
+---
+
+### BIOS EEPROM → BIOS parolası
+
+```
+  ETA-112 > BIOS EEPROM > BIOS parolası
+────────────────────────────────────────────────────────────
+  ▸ 1 Parolaları oku
+    2 Parola ayarla
+    3 Parola temizle
+    4 Model / destek bilgisi
+      Geri
+────────────────────────────────────────────────────────────
+  ↑/↓ gez · Enter seç · 1-9 doğrudan · Esc geri
+```
+
+- **Parola ayarla** yazmadan önce onay sorar. **Parola temizle** yalnızca hangi parolanın
+  silineceğini (`all` / `yonetici` / `kullanici`) sorar, ayrıca onay istemeden yazar.
+  **BIOS parolası değişikliğinin etkili olması için bilgisayarı yeniden başlatın.**
+- BIOS özelliği yalnızca **desteklenen modellerde** çalışır; desteklenmiyorsa işlem yapılmaz
+  ("DESTEKLENMİYOR" mesajı).
+
+---
+
+### BIOS EEPROM → MAC adresi
+
+```
+  ETA-112 > BIOS EEPROM > MAC adresi
+────────────────────────────────────────────────────────────
+  ▸ 1 MAC oku        güncel adresler ve Faz OUI durumu
+    2 MAC değiştir   eFuse'a kalıcı yazar — geri alınamaz
+    3 MAC doğrula    yazmadan önce sına — donanıma dokunmaz
+      Geri
+────────────────────────────────────────────────────────────
+  ↑/↓ gez · Enter seç · 1-9 doğrudan · Esc geri
+```
+
+Değişiklik Realtek NIC'in eFuse'una yazılır: işletim sisteminden bağımsızdır, disk
+değişse de kalır. **MAC değiştir** seçilince mevcut MAC, daha önce yazılanlar ve kalan
+yazma hakkı gösterilir; onaylanınca yazılıp geri-okunarak doğrulanır.
+
+- Yeni MAC modele ait izinli aralıkta olmalı.
+- ⚠ eFuse yazması **sınırlı sayıdadır ve geri alınamaz**.
+
+---
+
+### BIOS EEPROM → Windows ürün anahtarı
+
+```
+  ETA-112 > BIOS EEPROM > Windows ürün anahtarı
+────────────────────────────────────────────────────────────
+  ▸ 1 Anahtarı oku
+    2 Anahtarı değiştir
+      Geri
+────────────────────────────────────────────────────────────
+  ↑/↓ gez · Enter seç · 1-9 doğrudan · Esc geri
+```
+
+BIOS'a gömülü OEM anahtarı (ACPI MSDM) okur; Windows kurulunca bu anahtarla
+kendiliğinden etkinleşir. Yazma, MSDM tablosunu sağlama toplamıyla birlikte günceller
+ve geri-okunarak doğrulanır; **etkili olması için yeniden başlatma gerekir**.
+
+- Biçim: `XXXXX-XXXXX-XXXXX-XXXXX-XXXXX`
+- Yalnızca MSDM içeren cihazlarda (Windows 8/10/11 dönemi). Windows 7 dönemi
+  cihazlarda SLIC vardır; okunabilir anahtar içermez.
+
+---
+
+### Dokunmatik sürücü
+
+`eta-touchdrv` sürümlerini sırayla deneyip "düzeldi mi?" diye sorar; onayladığınız
+sürümü kalıcı hale getirir. Kalibrasyon kayması / yanlış dokunma noktası gibi
+sorunların hangi sürücü sürümünden geldiğini bulmak içindir.
+
+⚠ Bu bölüm **deneyseldir**. Menüye girerken seçeneklerin tam olarak test edilmediği ve
+donanım/yazılım yapılandırmasına zarar verebileceği uyarısı gösterilir; açıkça `e`
+yanıtı verilmeden alt menü açılmaz.
+
+```
+  ETA-112 > Dokunmatik sürücü
+────────────────────────────────────────────────────────────
+  ▸ 1 Durum
+    2 Sürümleri listele
+    3 Sürüm dene — hızlı
+    4 Sürüm dene — tam
+    5 Kalibrasyonu oku
+    6 Kalibrasyon karşılaştır
+    7 Ekrana dokunarak kalibre et
+    8 Başlangıç durumuna dön
+    9 Sabitlemeyi kaldır
+      Geri
+────────────────────────────────────────────────────────────
+  ↑/↓ gez · Enter seç · 1-9 doğrudan · Esc geri
+```
+
+Deneme iki kademeli. Kalibrasyon polinomunu kullanıcı uzayındaki sunucu uyguladığı
+için kalibrasyon sorunlarında **hızlı** kademe hem doğru hem yeterlidir:
+
+| | Ne değişir | Süre |
+|---|---|---|
+| **Hızlı** | yalnız sunucu ikilisi | saniyeler |
+| **Tam** | kernel modülü + sunucu + servis + udev | dakikalar (DKMS derler) |
+
+- Paketler çalışma anında GitHub'dan indirilip **sha256 ile doğrulanır**. İnternetsiz
+  ortamda `--yerel <depo>/dokunmatik` kullanın.
+- Panel tipi (OTD/4 kamera ↔ Optical/2 kamera) `lsusb` ile bulunur; hangi servis
+  örneğinin başlatılacağını ve hangi sunucu ikilisinin değiştirileceğini bu belirler.
+  Panel tanınmazsa araç **varsaymaz**: menüde sorar, betikte `--tip otd|optical`
+  bekler.
+- Başlangıç durumu yedeklenir; onay vermeden çıkarsanız otomatik geri yüklenir.
+- Onaylanan sürüm `apt-mark hold` + apt pin ile sabitlenir (yoksa otomatik güncelleme
+  geri alır). Kaldırmak için `dokunmatik serbest`.
+
+Arşiv, sürüm matrisi ve deneme sırasının nasıl çıkarıldığı:
+[`dokunmatik/README.md`](dokunmatik/README.md)
+
+#### Kalibrasyonu cihazdan okuma
+
+Sürüm denemesi sonuç vermezse sorun sürücüde değil, **panelin EEPROM'undaki
+kalibrasyon verisinde** olabilir:
+
+```bash
+sudo eta-112.py dokunmatik kalibrasyon oku --cikti saglam.json    # sağlam tahtada
+sudo eta-112.py dokunmatik kalibrasyon oku --cikti sorunlu.json   # sorunlu tahtada
+     eta-112.py dokunmatik kalibrasyon karsilastir saglam.json sorunlu.json
+```
+
+Karşılaştırma blokları bayt ve `float32` olarak gösterir; kalibrasyon polinomunun
+katsayıları doğrudan görülür. Tek fark `c1` katsayısının işaretiyse panelin eksenleri
+takas olmuş demektir.
+
+⚠ Okuma protokolü doğrulanmıştır, **yazma komutu doğrulanmamıştır**. `kalibrasyon yaz`
+yalnızca aynı panelden alınmış bir yedeği geri yüklemek içindir; `--onayliyorum`,
+otomatik yedek ve ayrı teyit ister, OTD (`2621:*`) panellerde kapalıdır. Kesinlik
+dökümü: [`dokunmatik/belgeler/kalibrasyon-protokolu.md`](dokunmatik/belgeler/kalibrasyon-protokolu.md)
+
+OTD (`2621:*`) panellerde ham blok yedeği alınıp geri yüklenebilir. Yazma yükünün
+düzeni varsayıma dayandığı için önce **no-op testi** ile sınanır — bir blok kendi
+değeriyle yazılır, hiçbir bayt değişmez (`x & x = x`), yanlış adresleme yazmadan
+önce/sonra dökülen pencere karşılaştırılarak yakalanır:
+
+```bash
+sudo eta-112.py dokunmatik kalibrasyon yazma-testi --onayliyorum            # sına
+sudo eta-112.py dokunmatik kalibrasyon depo --bolum 0x80 --tam --cikti ccb.json
+sudo eta-112.py dokunmatik kalibrasyon depo-yaz ccb.json --onayliyorum      # geri yaz
+```
+
+Geri yükleme blok 0'ı (seri / `ProductKey`) atlar, yazmadan önce hedefi yedekler ve
+her bloğu geri okuyup doğrular. Kalibrasyon panele özgü olduğu için bu bir
+**kurtarma** adımıdır; ardından panelin kendi aracıyla yeniden kalibre edilmeli.
+
+#### Ekrana dokunarak kalibrasyon
+
+Menüdeki **Ekrana dokunarak kalibre et**, `eta-touchdrv` paketindeki üretici aracını
+açar. Ekranda sırayla artı işaretleri çıkar, her birinin merkezine dokunulur:
+
+```bash
+sudo eta-112.py dokunmatik kalibrasyon ekran              # 4 nokta
+sudo eta-112.py dokunmatik kalibrasyon ekran --gelismis   # 16 nokta (yalnız Optical)
+sudo eta-112.py dokunmatik kalibrasyon ekran --sifirla    # kalibrasyonsuz duruma dön
+```
+
+| Panel | Araç | Açtığı aygıt |
+|---|---|---|
+| OTD (`2621:*`) | `OtdCalibrationTool` | `/dev/OtdOpticTouch` |
+| Optical (`6615:*`) | `calibrationTools` | `/dev/optictouch` |
+
+⚠ Bu araçlar yalnız **0.1.x kernel modülüyle** çalışır. Araçlar tüm paketlerde hâlâ
+bulunsa da 0.2.0'dan beri modül `/dev/OtdUsbRaw000` / `/dev/IRTouchOptical000`
+oluşturuyor ve araç eski düğümü bulamıyor. eta-112 uyumluluğu sürüm numarasından
+değil, aracın açtığı düğümün varlığından anlar. Uyumsuzsa aracı çalıştırmaz,
+gereken sürümü ve o sürümün bu çekirdekte kurulup kurulamayacağını söyler. 0.1.x
+modülünün 6.8+ çekirdeklerde (ETAP 23) derlenmesi beklenmediği için bu tahtalarda
+seçenek şimdilik yalnızca bilgi verir.
+
+Araç, çalışan Xorg'un ekranında (`-auth` dosyasıyla) açılır ve 5 dakikada
+bitmezse kapatılır. Yeni katsayılar panele yazılır; önceki kalibrasyon yedeklenemez,
+yalnızca sıfırlanabilir.
+
+---
+
+## Notlar
+
+- Araç **root** ister (`sudo`).
+- Menüsüz de kullanılabilir: `eta-112.py <kullanici|bios|mac|wkey|dokunmatik> --help`
+- Geliştirirken: `eta-112.py` değiştirilince `./gom.sh` çalıştırılmalı — `baslat.sh`
+  Python kaynağını gömülü taşır.
